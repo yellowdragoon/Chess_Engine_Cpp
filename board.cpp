@@ -6,6 +6,15 @@ typedef std::uint64_t U64;
 #define get_bit(bitboard, square) (bitboard & (1ULL << square))
 #define set_bit(bitboard, square) (bitboard |= (1ULL << square))
 #define remove_bit(bitboard, square) (bitboard &= ~(1ULL << square))
+// >> is -, << is +
+#define shift_n(bitboard) (bitboard << 1)
+#define shift_ne(bitboard) (bitboard << 9)
+#define shift_e(bitboard) (bitboard << 8)
+#define shift_se(bitboard) (bitboard << 7)
+#define shift_s(bitboard) (bitboard >> 1)
+#define shift_sw(bitboard) (bitboard >> 9)
+#define shift_w(bitboard) (bitboard >> 8)
+#define shift_nw(bitboard) (bitboard >> 7)
 
 // Little endian file-rank (LEFR) mapping implies following C++ enumeration:
 // https://www.chessprogramming.org/Square_Mapping_Considerations
@@ -21,6 +30,11 @@ enum enumSquare {
   h1, h2, h3, h4, h5, h6, h7, h8
 };
 
+enum side {
+  white, black
+};
+
+// Helper print function for bitboards
 void print_bitboard(U64 board) {
   for (int rank = 7; rank >= 0; rank--)
   {
@@ -31,16 +45,43 @@ void print_bitboard(U64 board) {
     }   
     std::cout << "|\n";
   }
-  std::cout << "    a   b   c   d   e   f   g   h";
+  std::cout << "    a   b   c   d   e   f   g   h\n";
+}
+
+// Generating attack mask for pawns
+U64 pawn_attack_mask(int square, int side){
+  U64 mask {0ULL};
+  U64 pawn_bitboard {0ULL};
+  set_bit(pawn_bitboard, square);
+
+  switch (side)
+  {
+  case white:
+    // Shift all bits 1 file forward and left/right
+    mask |= (shift_nw(pawn_bitboard) | shift_ne(pawn_bitboard));
+    break;
+  
+  case black:
+    // Shift all bits 1 file backwards and left/right 
+    mask |= (shift_sw(pawn_bitboard) | shift_se(pawn_bitboard));
+    break;
+  }
+
+  return mask;
 }
 
 int main() {
-  U64 sample {0};
-  set_bit(sample, a2);
-  sample |= (1ULL << g6);
-  sample |= (1ULL << e3);
-  remove_bit(sample, g6);
-  remove_bit(sample, g6);
-  print_bitboard(sample);
+  U64 bitboard {0};
+  set_bit(bitboard, a2);
+  set_bit(bitboard, b3);
+  set_bit(bitboard, d4);
+  set_bit(bitboard, f6);
+  print_bitboard(bitboard);
+  print_bitboard((pawn_attack_mask(a2, white)));
+  print_bitboard((pawn_attack_mask(a3, white)));
+  print_bitboard((pawn_attack_mask(a6, white)));
+  print_bitboard((pawn_attack_mask(a7, white)));
+  print_bitboard((pawn_attack_mask(f6, white)));
+  print_bitboard((pawn_attack_mask(h4, white)));
   return 0;
 }
