@@ -34,6 +34,8 @@ enum side {
   white, black
 };
 
+U64 pawn_attacks_table[2][64]; 
+
 // Helper print function for bitboards
 void print_bitboard(U64 board) {
   for (int rank = 7; rank >= 0; rank--)
@@ -49,7 +51,7 @@ void print_bitboard(U64 board) {
 }
 
 // Generating attack mask for pawns
-U64 pawn_attack_mask(int square, int side){
+U64 pawn_attack_mask(int side, int square){
   U64 mask {0ULL};
   U64 pawn_bitboard {0ULL};
   set_bit(pawn_bitboard, square);
@@ -70,6 +72,10 @@ U64 pawn_attack_mask(int square, int side){
   return mask;
 }
 
+U64 init_leaping_pieces_tables() {
+  return 0ULL;
+}
+
 int main() {
   U64 bitboard {0};
   set_bit(bitboard, a2);
@@ -77,11 +83,13 @@ int main() {
   set_bit(bitboard, d4);
   set_bit(bitboard, f6);
   print_bitboard(bitboard);
-  print_bitboard((pawn_attack_mask(a2, white)));
-  print_bitboard((pawn_attack_mask(a3, white)));
-  print_bitboard((pawn_attack_mask(a6, white)));
-  print_bitboard((pawn_attack_mask(a7, white)));
-  print_bitboard((pawn_attack_mask(f6, white)));
-  print_bitboard((pawn_attack_mask(h4, white)));
+  print_bitboard((pawn_attack_mask(white, a2)));
+  print_bitboard((pawn_attack_mask(white, g7)));
+  print_bitboard((pawn_attack_mask(black, a2)));
+  print_bitboard((pawn_attack_mask(black, e4)));
+  print_bitboard((pawn_attack_mask(white, a8)));
+  print_bitboard((pawn_attack_mask(white, h8)));
+  print_bitboard((pawn_attack_mask(black, a1)));
+  print_bitboard((pawn_attack_mask(black, h1)));
   return 0;
 }
