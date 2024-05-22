@@ -52,6 +52,7 @@ enum side {
 
 U64 pawn_attacks_table[2][64]; 
 U64 knight_attacks_table[64];
+U64 king_attacks_table[64];
 
 // Helper print function for bitboards
 void print_bitboard(U64 board) {
@@ -90,7 +91,7 @@ U64 pawn_attack_mask(int side, int square){
 }
 
 // Generating attack mask for knights
-U64 knight_attacks_mask(int square){
+U64 knight_attack_mask(int square){
   U64 mask {0ULL};
   U64 knight_bitboard {0ULL};
   set_bit(knight_bitboard, square);
@@ -98,13 +99,29 @@ U64 knight_attacks_mask(int square){
   // Shift all bits for the 8 knight directions
   mask |= (
     shift_n_ne(knight_bitboard) & (~rank_12) | 
-    shift_e_ne(knight_bitboard) & (~rank_1) | 
-    shift_e_se(knight_bitboard) & (~rank_8) | 
+    shift_e_ne(knight_bitboard) & (~rank_1)  | 
+    shift_e_se(knight_bitboard) & (~rank_8)  | 
     shift_s_se(knight_bitboard) & (~rank_78) | 
     shift_s_sw(knight_bitboard) & (~rank_78) | 
-    shift_w_sw(knight_bitboard) & (~rank_8) | 
-    shift_w_nw(knight_bitboard) & (~rank_1) | 
+    shift_w_sw(knight_bitboard) & (~rank_8)  | 
+    shift_w_nw(knight_bitboard) & (~rank_1)  | 
     shift_n_nw(knight_bitboard) & (~rank_12)
+  );
+
+  return mask;
+}
+
+// Generating attack mask for kings
+U64 king_attack_mask(int square){
+  U64 mask {0ULL};
+  U64 king_bitboard {0ULL};
+  set_bit(king_bitboard, square);
+
+  // Shift all bits for the 8 king directions
+  mask |= (
+    shift_nw(king_bitboard) | shift_n(king_bitboard) | shift_ne(king_bitboard) & (~rank_1) |
+    shift_sw(king_bitboard) | shift_s(king_bitboard) | shift_se(king_bitboard) & (~rank_8) |
+    shift_w(king_bitboard)  | shift_e(king_bitboard)
   );
 
   return mask;
@@ -118,7 +135,10 @@ void init_leaping_pieces_tables() {
     pawn_attacks_table[black][i] = pawn_attack_mask(black, i);
 
     // Knights
-    knight_attacks_table[i] = knight_attacks_mask(i);
+    knight_attacks_table[i] = knight_attack_mask(i);
+
+    // Kings
+    king_attacks_table[i] = king_attack_mask(i);
   }
 }
 
@@ -126,19 +146,7 @@ int main() {
   init_leaping_pieces_tables();
   for (int i = 0; i < 64; i++)
   {
-    //print_bitboard(pawn_attacks_table[white][i]);
+    print_bitboard(king_attacks_table[i]);
   }
-
-  print_bitboard(knight_attacks_mask(e4));
-  print_bitboard(knight_attacks_mask(a1));
-  print_bitboard(knight_attacks_mask(g7));
-  print_bitboard(knight_attacks_mask(h5));
-  print_bitboard(rank_1);
-  print_bitboard(rank_2);
-  print_bitboard(rank_12);
-  print_bitboard(rank_7);
-  print_bitboard(rank_8);
-  print_bitboard(rank_78);
-  
   return 0;
 }
