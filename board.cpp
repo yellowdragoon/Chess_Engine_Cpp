@@ -15,6 +15,22 @@ typedef std::uint64_t U64;
 #define shift_sw(bitboard) (bitboard >> 9)
 #define shift_w(bitboard) (bitboard >> 8)
 #define shift_nw(bitboard) (bitboard >> 7)
+// Knight directions
+#define shift_n_ne(bitboard) (bitboard << 10)
+#define shift_e_ne(bitboard) (bitboard << 17)
+#define shift_e_se(bitboard) (bitboard << 15)
+#define shift_s_se(bitboard) (bitboard << 6)
+#define shift_s_sw(bitboard) (bitboard >> 10)
+#define shift_w_sw(bitboard) (bitboard >> 17)
+#define shift_w_nw(bitboard) (bitboard >> 15)
+#define shift_n_nw(bitboard) (bitboard >> 6)
+
+const U64 rank_1 {0x0101010101010101};
+const U64 rank_2 {0x0202020202020202};
+const U64 rank_12 {0x0303030303030303};
+const U64 rank_7 {0x4040404040404040};
+const U64 rank_8 {0x8080808080808080};
+const U64 rank_78 {0xC0C0C0C0C0C0C0C0};
 
 // Little endian file-rank (LEFR) mapping implies following C++ enumeration:
 // https://www.chessprogramming.org/Square_Mapping_Considerations
@@ -35,6 +51,7 @@ enum side {
 };
 
 U64 pawn_attacks_table[2][64]; 
+U64 knight_attacks_table[64];
 
 // Helper print function for bitboards
 void print_bitboard(U64 board) {
@@ -72,24 +89,56 @@ U64 pawn_attack_mask(int side, int square){
   return mask;
 }
 
-U64 init_leaping_pieces_tables() {
-  return 0ULL;
+// Generating attack mask for knights
+U64 knight_attacks_mask(int square){
+  U64 mask {0ULL};
+  U64 knight_bitboard {0ULL};
+  set_bit(knight_bitboard, square);
+
+  // Shift all bits for the 8 knight directions
+  mask |= (
+    shift_n_ne(knight_bitboard) & (~rank_12) | 
+    shift_e_ne(knight_bitboard) & (~rank_1) | 
+    shift_e_se(knight_bitboard) & (~rank_8) | 
+    shift_s_se(knight_bitboard) & (~rank_78) | 
+    shift_s_sw(knight_bitboard) & (~rank_78) | 
+    shift_w_sw(knight_bitboard) & (~rank_8) | 
+    shift_w_nw(knight_bitboard) & (~rank_1) | 
+    shift_n_nw(knight_bitboard) & (~rank_12)
+  );
+
+  return mask;
+}
+
+void init_leaping_pieces_tables() {
+  for (int i = 0; i < 64; i++)
+  {
+    // Pawns
+    pawn_attacks_table[white][i] = pawn_attack_mask(white, i);
+    pawn_attacks_table[black][i] = pawn_attack_mask(black, i);
+
+    // Knights
+    knight_attacks_table[i] = knight_attacks_mask(i);
+  }
 }
 
 int main() {
-  U64 bitboard {0};
-  set_bit(bitboard, a2);
-  set_bit(bitboard, b3);
-  set_bit(bitboard, d4);
-  set_bit(bitboard, f6);
-  print_bitboard(bitboard);
-  print_bitboard((pawn_attack_mask(white, a2)));
-  print_bitboard((pawn_attack_mask(white, g7)));
-  print_bitboard((pawn_attack_mask(black, a2)));
-  print_bitboard((pawn_attack_mask(black, e4)));
-  print_bitboard((pawn_attack_mask(white, a8)));
-  print_bitboard((pawn_attack_mask(white, h8)));
-  print_bitboard((pawn_attack_mask(black, a1)));
-  print_bitboard((pawn_attack_mask(black, h1)));
+  init_leaping_pieces_tables();
+  for (int i = 0; i < 64; i++)
+  {
+    //print_bitboard(pawn_attacks_table[white][i]);
+  }
+
+  print_bitboard(knight_attacks_mask(e4));
+  print_bitboard(knight_attacks_mask(a1));
+  print_bitboard(knight_attacks_mask(g7));
+  print_bitboard(knight_attacks_mask(h5));
+  print_bitboard(rank_1);
+  print_bitboard(rank_2);
+  print_bitboard(rank_12);
+  print_bitboard(rank_7);
+  print_bitboard(rank_8);
+  print_bitboard(rank_78);
+  
   return 0;
 }
