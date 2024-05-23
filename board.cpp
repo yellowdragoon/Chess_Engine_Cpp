@@ -127,6 +127,26 @@ U64 king_attack_mask(int square){
   return mask;
 }
 
+// Generating attack mask for bishops
+U64 bishop_attack_mask(int square){
+  U64 mask {0ULL};
+  U64 bishop_bitboard {0ULL};
+  set_bit(bishop_bitboard, square);
+
+  int init_file { square / 8 };
+  int init_rank { square % 8 };
+
+  int f, r;
+
+  // trace rays in 4 directions (up to edge)
+  for (f = init_file + 1, r = init_rank + 1; f <= 6 && r <= 6; f++, r++) mask |= (1ULL << (f * 8 + r));
+  for (f = init_file - 1, r = init_rank + 1; f >= 1 && r <= 6; f--, r++) mask |= (1ULL << (f * 8 + r));
+  for (f = init_file + 1, r = init_rank - 1; f <= 6 && r >= 1; f++, r--) mask |= (1ULL << (f * 8 + r));
+  for (f = init_file - 1, r = init_rank - 1; f >= 1 && r >= 1; f--, r--) mask |= (1ULL << (f * 8 + r));
+  
+  return mask;
+}
+
 void init_leaping_pieces_tables() {
   for (int i = 0; i < 64; i++)
   {
@@ -148,5 +168,11 @@ int main() {
   {
     print_bitboard(king_attacks_table[i]);
   }
+
+  print_bitboard(bishop_attack_mask(e4));
+  print_bitboard(bishop_attack_mask(a1));
+  print_bitboard(bishop_attack_mask(b3));
+  print_bitboard(bishop_attack_mask(g8));
+  print_bitboard(bishop_attack_mask(f5));
   return 0;
 }
