@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <iostream>
+#include <random>
 #include <cstdint>
+#include <string.h>
 
 typedef std::uint64_t U64;
 #define get_bit(bitboard, square) (bitboard & (1ULL << square))
@@ -41,7 +43,6 @@ const U64 rank_78 {0xC0C0C0C0C0C0C0C0};
 
 // Little endian file-rank (LEFR) mapping implies following C++ enumeration:
 // https://www.chessprogramming.org/Square_Mapping_Considerations
-
 enum enumSquare {
   a1, a2, a3, a4, a5, a6, a7, a8,
   b1, b2, b3, b4, b5, b6, b7, b8,
@@ -57,9 +58,59 @@ enum side {
   white, black
 };
 
+// Precalculated attack tables
 U64 pawn_attacks_table[2][64]; 
 U64 knight_attacks_table[64];
 U64 king_attacks_table[64];
+
+// Precalculated bit counts for bishop/rook masks
+const int bishop_mask_bit_counts[64] {
+  6, 5, 5, 5, 5, 5, 5, 6, 
+  5, 5, 5, 5, 5, 5, 5, 5, 
+  5, 5, 7, 7, 7, 7, 5, 5, 
+  5, 5, 7, 9, 9, 7, 5, 5, 
+  5, 5, 7, 9, 9, 7, 5, 5, 
+  5, 5, 7, 7, 7, 7, 5, 5, 
+  5, 5, 5, 5, 5, 5, 5, 5, 
+  6, 5, 5, 5, 5, 5, 5, 6
+};
+
+const int rook_mask_bit_counts[64] {
+  12, 11, 11, 11, 11, 11, 11, 12, 
+  11, 10, 10, 10, 10, 10, 10, 11, 
+  11, 10, 10, 10, 10, 10, 10, 11, 
+  11, 10, 10, 10, 10, 10, 10, 11, 
+  11, 10, 10, 10, 10, 10, 10, 11, 
+  11, 10, 10, 10, 10, 10, 10, 11, 
+  11, 10, 10, 10, 10, 10, 10, 11, 
+  12, 11, 11, 11, 11, 11, 11, 12
+};
+
+// Random number gen using Mersenne Twisters: https://en.wikipedia.org/wiki/Mersenne_Twister
+const int rand_seed {424242};
+std::mt19937 generator(rand_seed);
+std::uniform_int_distribution<uint32_t> distribution(0, 0xFFFFFFFF);
+
+unsigned int generate_random_number_U32() { return distribution(generator); }
+
+// Random number gen for good candidate magic numbers: https://www.chessprogramming.org/Looking_for_Magics 
+// Based on Tord Romstad's proposal to find magics
+U64 generate_random_number_U64() {
+  U64 u1, u2, u3, u4;
+
+  // Slice top 16 bits of each random U32, used to randomise the U64
+  u1 = (U64)(generate_random_number_U32()) & 0xFFFF;
+  u2 = (U64)(generate_random_number_U32()) & 0xFFFF;
+  u3 = (U64)(generate_random_number_U32()) & 0xFFFF; 
+  u4 = (U64)(generate_random_number_U32()) & 0xFFFF;
+
+  return u1 | (u2 << 16) | (u3 << 32) | (u4 << 48);
+}
+
+// We want candidates to have low number of nonzero bits
+U64 generate_candidate_magic() {
+  return generate_random_number_U64() & generate_random_number_U64() & generate_random_number_U64();
+}
 
 // Helper print function for bitboards
 void print_bitboard(U64 board) {
@@ -287,16 +338,10 @@ void init_leaping_pieces_tables() {
 
 int main() {
   init_leaping_pieces_tables();
-
-  U64 mask = rook_attack_mask(e4);
-  int num_bits = count_bits(mask);
-  print_bitboard(mask);
-
-  for (int i = 0; i < 4096; i++)
+  for (int i = 0; i < 10; i++)
   {
-    print_bitboard(set_occupancy(i, mask, num_bits));
+    print_bitboard(generate_candidate_magic());
   }
-  
-  std::cout << num_bits;
+
   return 0;
 }
