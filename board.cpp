@@ -6,6 +6,12 @@ typedef std::uint64_t U64;
 #define get_bit(bitboard, square) (bitboard & (1ULL << square))
 #define set_bit(bitboard, square) (bitboard |= (1ULL << square))
 #define remove_bit(bitboard, square) (bitboard &= ~(1ULL << square))
+
+// GCC compiler builtin to optimally count number of bits in a ULL
+#define count_bits(bitboard) __builtin_popcountll(bitboard)
+// GCC compiler builtin to optimally get index of LS1B in a ULL
+#define ls1b_index(bitboard) (__builtin_ffsll(bitboard) - 1);
+
 // >> is -, << is +
 #define shift_n(bitboard) (bitboard << 1)
 #define shift_ne(bitboard) (bitboard << 9)
@@ -15,6 +21,7 @@ typedef std::uint64_t U64;
 #define shift_sw(bitboard) (bitboard >> 9)
 #define shift_w(bitboard) (bitboard >> 8)
 #define shift_nw(bitboard) (bitboard >> 7)
+
 // Knight directions
 #define shift_n_ne(bitboard) (bitboard << 10)
 #define shift_e_ne(bitboard) (bitboard << 17)
@@ -147,6 +154,81 @@ U64 bishop_attack_mask(int square){
   return mask;
 }
 
+// Generating attacks for bishops (slow) to use with magic bitboards later
+// TODO: refactor offsets to arrays for less repetition
+U64 generate_bishop_attacks_slow(int square, U64 blockers){
+  U64 mask {0ULL};
+
+  int init_file { square / 8 };
+  int init_rank { square % 8 };
+
+  int f, r;
+
+  // trace rays in 4 diagonal directions (including edge)
+  for (f = init_file + 1, r = init_rank + 1; f <= 7 && r <= 7; f++, r++) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+
+  for (f = init_file - 1, r = init_rank + 1; f >= 0 && r <= 7; f--, r++) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+
+  for (f = init_file + 1, r = init_rank - 1; f <= 7 && r >= 0; f++, r--) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+
+  for (f = init_file - 1, r = init_rank - 1; f >= 0 && r >= 0; f--, r--) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+  
+  return mask;
+}
+
+// Generating attacks for rooks (slow) to use with magic bitboards later
+U64 generate_rook_attacks_slow(int square, U64 blockers){
+  U64 mask {0ULL};
+
+  int init_file { square / 8 };
+  int init_rank { square % 8 };
+
+  int f, r;
+  
+  // trace rays in 4 orthogonal directions (including edge)
+  for (f = init_file + 1, r = init_rank; f <= 7; f++) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+
+  for (f = init_file - 1, r = init_rank; f >= 0; f--) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+
+  for (f = init_file, r = init_rank + 1; r <= 7; r++) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+
+  for (f = init_file, r = init_rank - 1; r >= 0; r--) {
+    int square = f * 8 + r;
+    mask |= (1ULL << square);
+    if ((blockers >> square) & 1ULL) break;
+  }
+  
+  return mask;
+}
+
 // Generating attack mask for rooks
 U64 rook_attack_mask(int square){
   U64 mask {0ULL};
@@ -159,12 +241,33 @@ U64 rook_attack_mask(int square){
   int f, r;
 
   // trace rays in 4 orthogonal directions (up to edge)
+  // TODO: replace with set_bit macro
   for (f = init_file + 1, r = init_rank; f <= 6; f++) mask |= (1ULL << (f * 8 + r));
   for (f = init_file - 1, r = init_rank; f >= 1; f--) mask |= (1ULL << (f * 8 + r));
   for (f = init_file, r = init_rank + 1; r <= 6; r++) mask |= (1ULL << (f * 8 + r));
   for (f = init_file, r = init_rank - 1; r >= 1; r--) mask |= (1ULL << (f * 8 + r));
   
   return mask;
+}
+
+/*
+Passes in attack mask, index of relevant bits in the mask, and number of bits in the mask
+For example, index 13 = b1101 so the blockers are at LS1B, LS3B, LS4B of the attackers mask
+*/
+U64 set_occupancy(int index, U64 attack_mask, int num_bits_in_mask){
+  U64 occupancy = 0ULL;
+
+  for (int i = 0; i < num_bits_in_mask; i++)
+  {
+    // Pop the ls1b index and conditionally set the occupancy bits
+    int square = ls1b_index(attack_mask);
+    remove_bit(attack_mask, square);
+
+    if (index & (1ULL << i))
+      set_bit(occupancy, square);
+  }
+  
+  return occupancy;
 }
 
 void init_leaping_pieces_tables() {
@@ -184,14 +287,16 @@ void init_leaping_pieces_tables() {
 
 int main() {
   init_leaping_pieces_tables();
-  for (int i = 0; i < 64; i++)
-  {
-    print_bitboard(king_attacks_table[i]);
-  }
 
-  print_bitboard(rook_attack_mask(e4));
-  print_bitboard(rook_attack_mask(a1));
-  print_bitboard(rook_attack_mask(d2));
-  print_bitboard(rook_attack_mask(f7));
+  U64 mask = rook_attack_mask(e4);
+  int num_bits = count_bits(mask);
+  print_bitboard(mask);
+
+  for (int i = 0; i < 4096; i++)
+  {
+    print_bitboard(set_occupancy(i, mask, num_bits));
+  }
+  
+  std::cout << num_bits;
   return 0;
 }
