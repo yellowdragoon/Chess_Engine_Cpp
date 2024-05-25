@@ -3,6 +3,8 @@
 #include <random>
 #include <cstdint>
 #include <string.h>
+#include "board.h"
+#include "magic.h"
 
 typedef std::uint64_t U64;
 #define get_bit(bitboard, square) (bitboard & (1ULL << square))
@@ -58,6 +60,10 @@ enum side {
   white, black
 };
 
+enum magic_pieces {
+  magic_rook, magic_bishop
+};
+
 // Precalculated attack tables
 U64 pawn_attacks_table[2][64]; 
 U64 knight_attacks_table[64];
@@ -110,6 +116,61 @@ U64 generate_random_number_U64() {
 // We want candidates to have low number of nonzero bits
 U64 generate_candidate_magic() {
   return generate_random_number_U64() & generate_random_number_U64() & generate_random_number_U64();
+}
+
+U64 find_magic_number(int square, int occupancy_bit_count, bool bishop) {
+  U64 occupancies[4096];
+  U64 attacks[4096];
+  U64 used_attacks[4096];
+  U64 attack_mask = bishop ? bishop_attack_mask(square) : rook_attack_mask(square);
+
+  int occupancy_indices {1 << occupancy_bit_count};
+
+  // Calculating the attacks for each configuration the slow way so we can test later with magic numbers
+  for (int i = 0; i < occupancy_indices; i++)
+  {
+    occupancies[i] = set_occupancy(i, attack_mask, occupancy_bit_count);
+    attacks[i] = bishop ? generate_bishop_attacks_slow(square, occupancies[i]) : 
+                          generate_rook_attacks_slow(square, occupancies[i]);
+  } 
+  
+  // Generating and testing magic numbers
+  for(int i = 0; i < 100000000; i++) {
+    U64 candidate = generate_candidate_magic();
+    // Initial check to see if candidate is suitable
+    if(count_bits((attack_mask * candidate) & 0xFF00000000000000ULL) < 6) continue;
+    // Initially, all used attacks are 0
+    memset(used_attacks, 0ULL, sizeof(used_attacks));
+    bool fail {};
+    for(int i = 0, fail = false; !fail && i < occupancy_indices; i++) {
+      int magic_index = (int)((occupancies[i] * candidate) >> (64 - occupancy_bit_count));
+
+      // If the index isn't used so far then fill it with the current attack bitboard
+      if(used_attacks[magic_index] == 0ULL) used_attacks[magic_index] = attacks[i];
+
+      // Otherwise if a bad collision occurs we move on
+      else if(used_attacks[magic_index] != attacks[i]) fail = true;
+    }
+    if(!fail) return candidate;
+  }
+  printf("Find magic number failed!\n");
+  return 0ULL;
+}
+
+void init_magic_numbers() {
+  // Find bishop magic numbers
+  for (int square = 0; square < 64; square++)
+  {
+    printf("0x%llxULL,\n", find_magic_number(square, bishop_mask_bit_counts[square], magic_bishop));
+  }
+
+  std::cout << "\n";
+
+  // Find rook magic numbers
+  for (int square = 0; square < 64; square++)
+  {
+    printf("0x%llxULL,\n", find_magic_number(square, rook_mask_bit_counts[square], magic_rook));
+  }
 }
 
 // Helper print function for bitboards
@@ -338,10 +399,7 @@ void init_leaping_pieces_tables() {
 
 int main() {
   init_leaping_pieces_tables();
-  for (int i = 0; i < 10; i++)
-  {
-    print_bitboard(generate_candidate_magic());
-  }
+  init_magic_numbers();
 
   return 0;
 }
