@@ -7,14 +7,14 @@
 #include "magic.h"
 
 typedef std::uint64_t U64;
-#define get_bit(bitboard, square) (bitboard & (1ULL << square))
-#define set_bit(bitboard, square) (bitboard |= (1ULL << square))
-#define remove_bit(bitboard, square) (bitboard &= ~(1ULL << square))
+#define get_bit(bitboard, square) ((bitboard) & (1ULL << (square)))
+#define set_bit(bitboard, square) ((bitboard) |= (1ULL << (square)))
+#define remove_bit(bitboard, square) ((bitboard) &= ~(1ULL << (square)))
 
 // GCC compiler builtin to optimally count number of bits in a ULL
 #define count_bits(bitboard) __builtin_popcountll(bitboard)
 // GCC compiler builtin to optimally get index of LS1B in a ULL
-#define ls1b_index(bitboard) (__builtin_ffsll(bitboard) - 1);
+#define ls1b_index(bitboard) (__builtin_ffsll(bitboard) - 1)
 
 // >> is -, << is +
 #define shift_n(bitboard) (bitboard << 1)
@@ -61,13 +61,23 @@ enum side {
 };
 
 enum magic_pieces {
-  magic_rook, magic_bishop
+  rook, bishop
 };
 
 // Precalculated attack tables
 U64 pawn_attacks_table[2][64]; 
 U64 knight_attacks_table[64];
 U64 king_attacks_table[64];
+
+// Plain magic bitboards: https://www.chessprogramming.org/Magic_Bitboards
+// Attack masks for bishop/rook
+U64 bishop_masks[64];
+U64 rook_masks[64];
+
+// Precalculated attack tables for bishop/rook
+U64 bishop_attacks_table[64][512];
+U64 rook_attacks_table[64][4096];
+
 
 // Precalculated bit counts for bishop/rook masks
 const int bishop_mask_bit_counts[64] {
@@ -135,14 +145,14 @@ U64 find_magic_number(int square, int occupancy_bit_count, bool bishop) {
   } 
   
   // Generating and testing magic numbers
-  for(int i = 0; i < 100000000; i++) {
+  for(int count = 0; count < 100000000; count++) {
     U64 candidate = generate_candidate_magic();
     // Initial check to see if candidate is suitable
     if(count_bits((attack_mask * candidate) & 0xFF00000000000000ULL) < 6) continue;
     // Initially, all used attacks are 0
-    memset(used_attacks, 0ULL, sizeof(used_attacks));
-    bool fail {};
-    for(int i = 0, fail = false; !fail && i < occupancy_indices; i++) {
+    memset(used_attacks, 0, sizeof(used_attacks));
+    bool fail = false;
+    for(int i = 0; !fail && i < occupancy_indices; i++) {
       int magic_index = (int)((occupancies[i] * candidate) >> (64 - occupancy_bit_count));
 
       // If the index isn't used so far then fill it with the current attack bitboard
@@ -151,7 +161,18 @@ U64 find_magic_number(int square, int occupancy_bit_count, bool bishop) {
       // Otherwise if a bad collision occurs we move on
       else if(used_attacks[magic_index] != attacks[i]) fail = true;
     }
-    if(!fail) return candidate;
+    if(!fail){
+      // printf("Found magic for square %d!\n", square);
+      // for (int j = 0; j < 10; j++)
+      // {
+      //   print_bitboard(occupancies[j]);
+      //   print_bitboard(attacks[j]);
+      //   print_bitboard(used_attacks[(int)((occupancies[j] * candidate) >> (64 - occupancy_bit_count))]);
+      //   printf("-------------------------\n");
+      // }
+      
+      return candidate;
+    } 
   }
   printf("Find magic number failed!\n");
   return 0ULL;
@@ -159,17 +180,18 @@ U64 find_magic_number(int square, int occupancy_bit_count, bool bishop) {
 
 void init_magic_numbers() {
   // Find bishop magic numbers
+  printf("Bishop magics:\n");
   for (int square = 0; square < 64; square++)
   {
-    printf("0x%llxULL,\n", find_magic_number(square, bishop_mask_bit_counts[square], magic_bishop));
+    //bishop_magics[square] = find_magic_number(square, bishop_mask_bit_counts[square], bishop);
+    printf("0x%llxULL,\n", find_magic_number(square, bishop_mask_bit_counts[square], bishop));
   }
 
-  std::cout << "\n";
-
   // Find rook magic numbers
+  printf("Rook magics:\n");
   for (int square = 0; square < 64; square++)
   {
-    printf("0x%llxULL,\n", find_magic_number(square, rook_mask_bit_counts[square], magic_rook));
+    printf("0x%llxULL,\n", find_magic_number(square, rook_mask_bit_counts[square], rook));
   }
 }
 
@@ -362,6 +384,30 @@ U64 rook_attack_mask(int square){
   return mask;
 }
 
+// Fast bishop attacks generation
+static inline U64 generate_bishop_attacks_magic(int square, U64 occupancy) {
+  // Only get the relevant bits
+  occupancy &= bishop_masks[square];
+  // Multiply with magic & shift to get magic index
+  occupancy *= bishop_magics[square];
+  occupancy >>= 64 - bishop_mask_bit_counts[square];
+
+  // Lookup in magic tables and return
+  return bishop_attacks_table[square][occupancy];
+}
+
+// Fast bishop attacks generation
+static inline U64 generate_rook_attacks_magic(int square, U64 occupancy) {
+  // Only get the relevant bits
+  occupancy &= rook_masks[square];
+  // Multiply with magic & shift to get magic index
+  occupancy *= rook_magics[square];
+  occupancy >>= 64 - rook_mask_bit_counts[square];
+
+  // Lookup in magic tables and return
+  return rook_attacks_table[square][occupancy];
+}
+
 /*
 Passes in attack mask, index of relevant bits in the mask, and number of bits in the mask
 For example, index 13 = b1101 so the blockers are at LS1B, LS3B, LS4B of the attackers mask
@@ -397,9 +443,67 @@ void init_leaping_pieces_tables() {
   }
 }
 
-int main() {
-  init_leaping_pieces_tables();
-  init_magic_numbers();
+void init_sliding_attack_masks() {
+  for (int square = 0; square < 64; square++)
+  {
+    bishop_masks[square] = bishop_attack_mask(square);
+    rook_masks[square] = rook_attack_mask(square);
+  }
+}
 
+void init_sliding_pieces_tables(bool bishop) {
+  for (int square = 0; square < 64; square++)
+  {
+    U64 attack_mask = bishop ? bishop_masks[square] : rook_masks[square];
+
+    int bits_in_mask = count_bits(attack_mask);
+    int occupancy_indices = 1 << bits_in_mask;
+
+    for (int i = 0; i < occupancy_indices; i++)
+    {
+      if(bishop) {
+        U64 occupancy = set_occupancy(i, attack_mask, bits_in_mask);
+        int magic_index = (occupancy * bishop_magics[square]) >> (64 - bishop_mask_bit_counts[square]);
+        bishop_attacks_table[square][magic_index] = generate_bishop_attacks_slow(square, occupancy);
+      }
+      else {
+        U64 occupancy = set_occupancy(i, attack_mask, bits_in_mask);
+        int magic_index = (occupancy * rook_magics[square]) >> (64 - rook_mask_bit_counts[square]);
+        rook_attacks_table[square][magic_index] = generate_rook_attacks_slow(square, occupancy);
+      }
+    }
+  }
+}
+
+void init_all() {
+  // Precalculated attack tables for leaping pieces
+  init_leaping_pieces_tables();
+  // Precalculated attack masks for bishop/rook
+  init_sliding_attack_masks();
+  // init_magic_numbers();
+  // Populate the attack tables using magic numbers for bishop/rook
+  init_sliding_pieces_tables(bishop);
+  init_sliding_pieces_tables(rook);
+}
+
+int main() {
+  init_all();
+  
+  U64 blockers {0ULL};
+  print_bitboard(generate_bishop_attacks_magic(a1, blockers));
+  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
+  set_bit(blockers, g7);
+  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
+  set_bit(blockers, b2);
+  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
+  set_bit(blockers, f4);
+  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
+  set_bit(blockers, g3);
+  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
+  print_bitboard(generate_bishop_attacks_magic(d5, blockers));
+
+  print_bitboard(generate_rook_attacks_magic(g4, blockers));
+  print_bitboard(generate_rook_attacks_magic(b7, blockers));
+  
   return 0;
 }
