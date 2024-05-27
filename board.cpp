@@ -708,6 +708,40 @@ void print_attacked_squares(int side) {
   std::cout << "    a   b   c   d   e   f   g   h\n";
 }
 
+static inline void generate_moves() {
+  int source_square;
+  int target_square;
+
+  U64 current_bitboard;
+  U64 attacks;
+
+  for (int piece = P; piece <= k; piece++)
+  {
+    current_bitboard = piece_bitboards[piece];
+
+    // Generate white pawn/castling moves
+    if(side_to_move == white) {
+
+    }
+
+    // Generate black pawn/castling moves
+    else{
+
+    }
+
+    // Rook moves
+
+    // Knight moves
+
+    // Bishop moves
+
+    // Queen moves
+    
+    // King moves
+  }
+  
+}
+
 void init_all() {
   // Precalculated attack tables for leaping pieces
   init_leaping_pieces_tables();
