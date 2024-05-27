@@ -38,6 +38,8 @@ typedef std::uint64_t U64;
 #define shift_w_nw(bitboard) (bitboard >> 15)
 #define shift_n_nw(bitboard) (bitboard >> 6)
 
+#define test_fen "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 "
+
 const U64 rank_1 {0x0101010101010101};
 const U64 rank_2 {0x0202020202020202};
 const U64 rank_12 {0x0303030303030303};
@@ -155,6 +157,96 @@ const int rook_mask_bit_counts[64] {
   11, 10, 10, 10, 10, 10, 10, 11, 
   12, 11, 11, 11, 11, 11, 11, 12
 };
+
+void reset_board_state() {
+  memset(piece_bitboards, 0, sizeof(piece_bitboards));
+  memset(occupancy_bitboards, 0, sizeof(occupancy_bitboards));
+  side_to_move = white;
+  en_passant_square = -1;
+  castle = 0;
+}
+
+void parse_fen(char * fen) {
+  reset_board_state();
+  // loop over board squares
+  for (int square = 0; square < 64 && *fen && *fen != ' '; )
+  {
+    int file = square / 8;
+    int rank = square % 8;
+
+    int actual_square = ((rank + 1) * 8) - 1 - file;
+    // match ascii pieces within FEN string
+    if ((*fen >= 'b' && *fen <= 'r') || (*fen >= 'B' && *fen <= 'R'))
+    {
+        // init piece type
+        int piece = char_to_pieces[*fen];
+        
+        // set piece on corresponding bitboard
+        set_bit(piece_bitboards[piece], actual_square);
+        
+        // increment square and pointer to FEN string
+        square++;
+        fen++;
+    }
+      
+    // match empty square numbers within FEN string
+    else if (*fen >= '1' && *fen <= '8')
+    {
+        // init offset (convert char 0 to int 0)
+        int offset = *fen - '0';
+        
+        // increment square and pointer to FEN string
+        square += offset;
+        fen++;
+    }
+    
+    // match rank separator
+    else if (*fen == '/')
+    {
+        // increment pointer to FEN string
+        fen++;
+    }
+    else
+    {
+        fen++; // error
+    }
+  }
+
+  // Move past first space, now side to move flag
+  fen++;
+
+  side_to_move = (*fen == 'w') ? white : black;
+
+  // Move past side to move & space, handle castling rights
+  fen += 2;
+
+  while (*fen != ' ') {
+    switch (*fen) {
+      case 'K': castle |= w_kside; break;
+      case 'Q': castle |= w_qside; break;
+      case 'k': castle |= b_kside; break;
+      case 'q': castle |= b_qside; break;
+      case '-': break;
+    }
+
+    fen++;
+  }
+
+  // Move to en passant square
+  fen++;
+
+  if (*fen != '-') {
+    int file = fen[0] - 'a';
+    int rank = fen[1] - '0' - 1;
+    en_passant_square = 8 * file + rank;
+  }
+
+  else{
+    en_passant_square = -1;
+  }
+
+  //printf("fen: '%s'\n", fen);
+}
 
 // Random number gen using Mersenne Twisters: https://en.wikipedia.org/wiki/Mersenne_Twister
 const int rand_seed {424242};
@@ -571,45 +663,7 @@ void init_all() {
 
 int main() {
   //init_all();
-  set_bit(piece_bitboards[P], a2);
-  set_bit(piece_bitboards[P], b2);
-  set_bit(piece_bitboards[P], c2);
-  set_bit(piece_bitboards[P], d2);
-  set_bit(piece_bitboards[P], e2);
-  set_bit(piece_bitboards[P], f2);
-  set_bit(piece_bitboards[P], g2);
-  set_bit(piece_bitboards[P], h2);
-  set_bit(piece_bitboards[R], a1);
-  set_bit(piece_bitboards[R], h1);
-  set_bit(piece_bitboards[N], b1);
-  set_bit(piece_bitboards[N], g1);
-  set_bit(piece_bitboards[B], c1);
-  set_bit(piece_bitboards[B], f1);
-  set_bit(piece_bitboards[Q], d1);
-  set_bit(piece_bitboards[K], e1);
-
-  set_bit(piece_bitboards[p], a7);
-  set_bit(piece_bitboards[p], b7);
-  set_bit(piece_bitboards[p], c7);
-  set_bit(piece_bitboards[p], d7);
-  set_bit(piece_bitboards[p], e7);
-  set_bit(piece_bitboards[p], f7);
-  set_bit(piece_bitboards[p], g7);
-  set_bit(piece_bitboards[p], h7);
-  set_bit(piece_bitboards[r], a8);
-  set_bit(piece_bitboards[r], h8);
-  set_bit(piece_bitboards[n], b8);
-  set_bit(piece_bitboards[n], g8);
-  set_bit(piece_bitboards[b], c8);
-  set_bit(piece_bitboards[b], f8);
-  set_bit(piece_bitboards[q], d8);
-  set_bit(piece_bitboards[k], e8);
-  side_to_move = black;
-  en_passant_square = e5;
-  castle |= w_kside;
-  castle |= w_qside;
-  castle |= b_kside;
-  castle |= b_qside;
+  parse_fen(test_fen);
   print_board();
   return 0;
 }
