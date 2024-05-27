@@ -3,6 +3,8 @@
 #include <random>
 #include <cstdint>
 #include <string.h>
+#include <string>
+#include <unordered_map>
 #include "board.h"
 #include "magic.h"
 
@@ -56,12 +58,47 @@ enum enumSquare {
   h1, h2, h3, h4, h5, h6, h7, h8
 };
 
+const char * index_to_square_name[] {
+  "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8",
+  "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8",
+  "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8",
+  "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8",
+  "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8",
+  "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8",
+  "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8",
+  "h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"
+};
+
 enum side {
   white, black
 };
 
 enum magic_pieces {
   rook, bishop
+};
+
+// capitalized = white, lower = black
+enum pieces {
+  P, R, N, B, Q, K, p, r, n, b, q, k
+};
+
+// C-style string to easily convert from enum -> char
+const char pieces_ascii[] {"PRNBQKprnbqk"};
+
+// Mapping to easily convert from char -> enum
+std::unordered_map<char, pieces> char_to_pieces = {
+  {'P', P}, 
+  {'R', R}, 
+  {'N', N}, 
+  {'B', B},
+  {'Q', Q}, 
+  {'K', K}, 
+  {'p', p}, 
+  {'r', r},
+  {'n', n}, 
+  {'b', b}, 
+  {'q', q}, 
+  {'k', k}
 };
 
 // Precalculated attack tables
@@ -78,6 +115,23 @@ U64 rook_masks[64];
 U64 bishop_attacks_table[64][512];
 U64 rook_attacks_table[64][4096];
 
+// Variables to keep track of board state
+// 6 bitboards for white pieces/pawns, 6 for black
+U64 piece_bitboards[12] = {0ULL};
+
+// bitboards for all occupied squares: white, black, both
+U64 occupancy_bitboards[3] = {0ULL};
+
+// Side to move
+int side_to_move;
+
+// Legal en passant square
+int en_passant_square = -1;
+
+// Castling rights - 4 bit number, (LSB -> MSB): White Kside, White Qside, Black Kside, Black Qside
+int castle;
+
+enum castle_flags{w_kside = 1, w_qside = 2, b_kside = 4, b_qside = 8};
 
 // Precalculated bit counts for bishop/rook masks
 const int bishop_mask_bit_counts[64] {
@@ -207,6 +261,35 @@ void print_bitboard(U64 board) {
     std::cout << "|\n";
   }
   std::cout << "    a   b   c   d   e   f   g   h\n";
+}
+
+// Print the entire board
+void print_board() {
+  for (int rank = 7; rank >= 0; rank--)
+  {
+    std::cout << rank + 1 << " ";
+    for (int file = 0; file < 8; file++)
+    {
+      int piece = -1;
+      for (int current_bb = P; current_bb <= k; current_bb++)
+      {
+        if(get_bit(piece_bitboards[current_bb], 8 * file + rank)) piece = current_bb;
+      }
+
+      if(piece == -1) std::cout << "|   ";
+      else printf("| %c ", pieces_ascii[piece]);
+    }   
+    std::cout << "|\n";
+  }
+  std::cout << "    a   b   c   d   e   f   g   h\n";
+  std::cout << "Side to move: " << ((side_to_move == white) ? "white" : "black") << "\n";
+  std::cout << "En passant square: " << ((en_passant_square == -1) ? "none" : index_to_square_name[en_passant_square]) << "\n";
+  printf("Castling rights: %c%c%c%c\n\n",
+    (castle & w_kside) ? 'K' : '-',
+    (castle & w_qside) ? 'Q' : '-',
+    (castle & b_kside) ? 'k' : '-',
+    (castle & b_qside) ? 'q' : '-'
+  );
 }
 
 // Generating attack mask for pawns
@@ -487,23 +570,46 @@ void init_all() {
 }
 
 int main() {
-  init_all();
-  
-  U64 blockers {0ULL};
-  print_bitboard(generate_bishop_attacks_magic(a1, blockers));
-  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
-  set_bit(blockers, g7);
-  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
-  set_bit(blockers, b2);
-  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
-  set_bit(blockers, f4);
-  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
-  set_bit(blockers, g3);
-  print_bitboard(generate_bishop_attacks_magic(e5, blockers));
-  print_bitboard(generate_bishop_attacks_magic(d5, blockers));
+  //init_all();
+  set_bit(piece_bitboards[P], a2);
+  set_bit(piece_bitboards[P], b2);
+  set_bit(piece_bitboards[P], c2);
+  set_bit(piece_bitboards[P], d2);
+  set_bit(piece_bitboards[P], e2);
+  set_bit(piece_bitboards[P], f2);
+  set_bit(piece_bitboards[P], g2);
+  set_bit(piece_bitboards[P], h2);
+  set_bit(piece_bitboards[R], a1);
+  set_bit(piece_bitboards[R], h1);
+  set_bit(piece_bitboards[N], b1);
+  set_bit(piece_bitboards[N], g1);
+  set_bit(piece_bitboards[B], c1);
+  set_bit(piece_bitboards[B], f1);
+  set_bit(piece_bitboards[Q], d1);
+  set_bit(piece_bitboards[K], e1);
 
-  print_bitboard(generate_rook_attacks_magic(g4, blockers));
-  print_bitboard(generate_rook_attacks_magic(b7, blockers));
-  
+  set_bit(piece_bitboards[p], a7);
+  set_bit(piece_bitboards[p], b7);
+  set_bit(piece_bitboards[p], c7);
+  set_bit(piece_bitboards[p], d7);
+  set_bit(piece_bitboards[p], e7);
+  set_bit(piece_bitboards[p], f7);
+  set_bit(piece_bitboards[p], g7);
+  set_bit(piece_bitboards[p], h7);
+  set_bit(piece_bitboards[r], a8);
+  set_bit(piece_bitboards[r], h8);
+  set_bit(piece_bitboards[n], b8);
+  set_bit(piece_bitboards[n], g8);
+  set_bit(piece_bitboards[b], c8);
+  set_bit(piece_bitboards[b], f8);
+  set_bit(piece_bitboards[q], d8);
+  set_bit(piece_bitboards[k], e8);
+  side_to_move = black;
+  en_passant_square = e5;
+  castle |= w_kside;
+  castle |= w_qside;
+  castle |= b_kside;
+  castle |= b_qside;
+  print_board();
   return 0;
 }
