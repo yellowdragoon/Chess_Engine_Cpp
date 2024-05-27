@@ -38,8 +38,8 @@ typedef std::uint64_t U64;
 #define shift_w_nw(bitboard) (bitboard >> 15)
 #define shift_n_nw(bitboard) (bitboard >> 6)
 
-#define start_position_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 "
-#define test_fen "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 "
+char * start_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ";
+char * test_fen = "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 ";
 
 const U64 rank_1 {0x0101010101010101};
 const U64 rank_2 {0x0202020202020202};
@@ -448,9 +448,9 @@ U64 king_attack_mask(int square){
 
   // Shift all bits for the 8 king directions
   mask |= (
-    shift_nw(king_bitboard) | shift_n(king_bitboard) | shift_ne(king_bitboard) & (~rank_1) |
-    shift_sw(king_bitboard) | shift_s(king_bitboard) | shift_se(king_bitboard) & (~rank_8) |
-    shift_w(king_bitboard)  | shift_e(king_bitboard)
+    ((shift_nw(king_bitboard) | shift_n(king_bitboard) | shift_ne(king_bitboard)) & (~rank_1)) |
+    ((shift_sw(king_bitboard) | shift_s(king_bitboard) | shift_se(king_bitboard)) & (~rank_8)) |
+    shift_w(king_bitboard)    | shift_e(king_bitboard)
   );
 
   return mask;
@@ -667,6 +667,47 @@ void init_sliding_pieces_tables(bool bishop) {
   }
 }
 
+// Is square attacked by the given side?
+static inline bool is_square_attacked(int square, int side) {
+
+  // For white pawn to attack a square, must extend a black pawn attack mask from that square
+  if((side == white) && (pawn_attacks_table[black][square] & piece_bitboards[P])) return true;
+
+  // Vice versa for black pawns (slightly confusing!)
+  if((side == black) && (pawn_attacks_table[white][square] & piece_bitboards[p])) return true;
+
+  // Knight attacks
+  if(knight_attacks_table[square] & (piece_bitboards[side == white ? N:n])) return true;
+
+  // King attacks
+  if(king_attacks_table[square] & (piece_bitboards[side == white ? K:k])) return true;
+
+  // Bishop attacks
+  if(generate_bishop_attacks_magic(square, occupancy_bitboards[2]) & (piece_bitboards[side == white ? B:b])) return true;
+
+  // Rook attacks
+  if(generate_rook_attacks_magic(square, occupancy_bitboards[2]) & (piece_bitboards[side == white ? R:r])) return true;
+
+  // Queen attacks
+  if(generate_queen_attacks(square, occupancy_bitboards[2]) & (piece_bitboards[side == white ? Q:q])) return true;
+
+  return false;
+}
+
+// Print all squares attacked by the given side
+void print_attacked_squares(int side) {
+  for (int rank = 7; rank >= 0; rank--)
+  {
+    std::cout << rank + 1 << " ";
+    for (int file = 0; file < 8; file++)
+    {
+      std::cout << (is_square_attacked((8 * file + rank), side) ? "| X " : "|   "); 
+    }   
+    std::cout << "|\n";
+  }
+  std::cout << "    a   b   c   d   e   f   g   h\n";
+}
+
 void init_all() {
   // Precalculated attack tables for leaping pieces
   init_leaping_pieces_tables();
@@ -679,11 +720,11 @@ void init_all() {
 }
 
 int main() {
-  //init_all();
-  parse_fen(start_position_fen);
+  init_all();
+  parse_fen(test_fen);
   print_board();
-  print_bitboard(occupancy_bitboards[white]);
-  print_bitboard(occupancy_bitboards[black]);
-  print_bitboard(occupancy_bitboards[2]);
+  print_attacked_squares(white);
+  print_attacked_squares(black);
+
   return 0;
 }
