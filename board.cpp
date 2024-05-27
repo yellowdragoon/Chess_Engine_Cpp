@@ -38,6 +38,7 @@ typedef std::uint64_t U64;
 #define shift_w_nw(bitboard) (bitboard >> 15)
 #define shift_n_nw(bitboard) (bitboard >> 6)
 
+#define start_position_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 "
 #define test_fen "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 "
 
 const U64 rank_1 {0x0101010101010101};
@@ -244,6 +245,18 @@ void parse_fen(char * fen) {
   else{
     en_passant_square = -1;
   }
+
+  // populate white occupancy bitboard
+  for (int piece = P; piece <= K; piece++)
+      occupancy_bitboards[white] |= piece_bitboards[piece];
+  
+  // populate black occupancy bitboard
+  for (int piece = p; piece <= k; piece++)
+      occupancy_bitboards[black] |= piece_bitboards[piece];
+
+  // init all occupancies
+  occupancy_bitboards[2] |= occupancy_bitboards[white];
+  occupancy_bitboards[2] |= occupancy_bitboards[black];
 
   //printf("fen: '%s'\n", fen);
 }
@@ -583,6 +596,10 @@ static inline U64 generate_rook_attacks_magic(int square, U64 occupancy) {
   return rook_attacks_table[square][occupancy];
 }
 
+static inline U64 generate_queen_attacks(int square, U64 occupancy) {
+  return generate_bishop_attacks_magic(square, occupancy) | generate_rook_attacks_magic(square, occupancy);
+}
+
 /*
 Passes in attack mask, index of relevant bits in the mask, and number of bits in the mask
 For example, index 13 = b1101 so the blockers are at LS1B, LS3B, LS4B of the attackers mask
@@ -663,7 +680,10 @@ void init_all() {
 
 int main() {
   //init_all();
-  parse_fen(test_fen);
+  parse_fen(start_position_fen);
   print_board();
+  print_bitboard(occupancy_bitboards[white]);
+  print_bitboard(occupancy_bitboards[black]);
+  print_bitboard(occupancy_bitboards[2]);
   return 0;
 }
