@@ -40,6 +40,7 @@ typedef std::uint64_t U64;
 
 char * start_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ";
 char * test_fen = "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 ";
+char * tricky_position_fen =  "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ";
 
 const U64 rank_1 {0x0101010101010101};
 const U64 rank_2 {0x0202020202020202};
@@ -708,7 +709,7 @@ void print_attacked_squares(int side) {
   std::cout << "    a   b   c   d   e   f   g   h\n";
 }
 
-static inline void generate_moves() {
+void generate_moves() {
   int source_square;
   int target_square;
 
@@ -721,12 +722,68 @@ static inline void generate_moves() {
 
     // Generate white pawn/castling moves
     if(side_to_move == white) {
+      if(piece == P) {
+        while(current_bitboard) {
+          source_square = ls1b_index(current_bitboard);
+          target_square = source_square + 1;
 
+          // If target on the board and target not occupied
+          if((target_square <= h8) && (!get_bit(occupancy_bitboards[2], target_square))) {
+            // Pawn promotion
+            if(target_square % 8 == 7) {
+              printf("white pawn promotes: %s%sq\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("white pawn promotes: %s%sr\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("white pawn promotes: %s%sn\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("white pawn promotes: %s%sb\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+            }
+
+            // Pawn pushes
+            else{
+              printf("white pawn push: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+
+              // Double push
+              if((source_square % 8 == 1) && !get_bit(occupancy_bitboards[2], target_square + 1)) {
+                printf("white pawn double push: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square + 1]);
+              }
+            }
+          }
+
+          remove_bit(current_bitboard, source_square);
+        }
+      }
     }
 
     // Generate black pawn/castling moves
     else{
+      if(piece == p) {
+        while(current_bitboard) {
+          source_square = ls1b_index(current_bitboard);
+          target_square = source_square - 1;
 
+          // If target on the board and target not occupied
+          if((target_square >= a1) && (!get_bit(occupancy_bitboards[2], target_square))) {
+            // Pawn promotion
+            if(target_square % 8 == 0) {
+              printf("black pawn promotes: %s%sq\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("black pawn promotes: %s%sr\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("black pawn promotes: %s%sn\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("black pawn promotes: %s%sb\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+            }
+
+            // Pawn pushes
+            else{
+              printf("black pawn push: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+
+              // Double push
+              if((source_square % 8 == 6) && !get_bit(occupancy_bitboards[2], target_square - 1)) {
+                printf("black pawn double push: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square - 1]);
+              }
+            }
+          }
+
+          remove_bit(current_bitboard, source_square);
+        }
+      }
     }
 
     // Rook moves
@@ -736,7 +793,7 @@ static inline void generate_moves() {
     // Bishop moves
 
     // Queen moves
-    
+
     // King moves
   }
   
@@ -755,10 +812,9 @@ void init_all() {
 
 int main() {
   init_all();
-  parse_fen(test_fen);
+  parse_fen("r3k2r/pPppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPppPPP/R3K2R b KQkq - 0 1 ");
   print_board();
-  print_attacked_squares(white);
-  print_attacked_squares(black);
+  generate_moves();
 
   return 0;
 }
