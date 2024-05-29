@@ -748,7 +748,59 @@ void generate_moves() {
             }
           }
 
+          // Captures
+          attacks = pawn_attacks_table[white][source_square] & occupancy_bitboards[black];
+
+          while(attacks) {
+            target_square = ls1b_index(attacks);
+
+            if(target_square % 8 == 7) {
+              printf("white pawn captures/promotes: %s%sq\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("white pawn captures/promotes: %s%sr\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("white pawn captures/promotes: %s%sn\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("white pawn captures/promotes: %s%sb\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+            }
+            else{
+              printf("white pawn captures: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+            }
+
+            remove_bit(attacks, target_square);
+          }
+
+          // En passant capture
+          if(en_passant_square != -1) {
+            U64 enpassant_attacks = pawn_attacks_table[white][source_square] & (1ULL << en_passant_square);
+
+            if(enpassant_attacks) {
+              int target_enpassant = ls1b_index(enpassant_attacks);
+              printf("white pawn enpassant: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_enpassant]);
+            }
+          }
+
           remove_bit(current_bitboard, source_square);
+        }
+      }
+
+      // Castling moves
+      else if (piece == K) {
+        // Castle short
+        if(castle & w_kside){
+          // Empty squares on g1, f1
+          if(!get_bit(occupancy_bitboards[2], f1) && !get_bit(occupancy_bitboards[2], g1)){
+            if(!is_square_attacked(e1, black) && !is_square_attacked(f1, black)){
+              printf("white castle: e1g1\n");
+            }
+          }
+        }
+
+        // Castle long
+        if(castle & w_qside){
+          // Empty squares on b1, c1, d1
+          if(!get_bit(occupancy_bitboards[2], b1) && !get_bit(occupancy_bitboards[2], c1) && !get_bit(occupancy_bitboards[2], d1)){
+            if(!is_square_attacked(d1, black) && !is_square_attacked(e1, black)){
+              printf("white castle: e1c1\n");
+            }
+          }
         }
       }
     }
@@ -781,20 +833,172 @@ void generate_moves() {
             }
           }
 
+          // Captures
+          attacks = pawn_attacks_table[black][source_square] & occupancy_bitboards[white];
+
+          while(attacks) {
+            target_square = ls1b_index(attacks);
+
+            if(target_square % 8 == 0) {
+              printf("black pawn captures/promotes: %s%sq\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("black pawn captures/promotes: %s%sr\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("black pawn captures/promotes: %s%sn\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+              printf("black pawn captures/promotes: %s%sb\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+            }
+            else{
+              printf("black pawn captures: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+            }
+
+            remove_bit(attacks, target_square);
+          }
+
+          // En passant capture
+          if(en_passant_square != -1) {
+            U64 enpassant_attacks = pawn_attacks_table[black][source_square] & (1ULL << en_passant_square);
+
+            if(enpassant_attacks) {
+              int target_enpassant = ls1b_index(enpassant_attacks);
+              printf("black pawn enpassant: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_enpassant]);
+            }
+          }
+
           remove_bit(current_bitboard, source_square);
+        }
+      }
+
+      // Castling moves
+      else if (piece == k) {
+        // Castle short
+        if(castle & b_kside){
+          // Empty squares on g8, f8
+          if(!get_bit(occupancy_bitboards[2], f8) && !get_bit(occupancy_bitboards[2], g8)){
+            if(!is_square_attacked(e8, white) && !is_square_attacked(f8, white)){
+              printf("black castle: e8g8\n");
+            }
+          }
+        }
+
+        // Castle long
+        if(castle & b_qside){
+          // Empty squares on b8, c8, d8
+          if(!get_bit(occupancy_bitboards[2], b8) && !get_bit(occupancy_bitboards[2], c8) && !get_bit(occupancy_bitboards[2], d8)){
+            if(!is_square_attacked(d8, white) && !is_square_attacked(e8, white)){
+              printf("black castle: e8c8\n");
+            }
+          }
         }
       }
     }
 
     // Rook moves
+    if((side_to_move == white) ? piece == R : piece == r) {
+      while(current_bitboard){
+        source_square = ls1b_index(current_bitboard);
+        attacks = generate_rook_attacks_magic(source_square, occupancy_bitboards[2]) & ((side_to_move == white) ? ~occupancy_bitboards[white]: ~occupancy_bitboards[black]);
+
+        while(attacks){
+          target_square = ls1b_index(attacks);
+
+          // Quiet move (needed for quiescence search later)
+          if(!get_bit((side_to_move == white) ? occupancy_bitboards[black] : occupancy_bitboards[white], target_square)){
+            printf("quiet rook move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          else{
+            printf("rook capture move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          remove_bit(attacks, target_square);
+        }
+        remove_bit(current_bitboard, source_square);
+      }
+    }
 
     // Knight moves
+    if((side_to_move == white) ? piece == N : piece == n) {
+      while(current_bitboard){
+        source_square = ls1b_index(current_bitboard);
+        attacks = knight_attacks_table[source_square] & ((side_to_move == white) ? ~occupancy_bitboards[white]: ~occupancy_bitboards[black]);
+
+        while(attacks){
+          target_square = ls1b_index(attacks);
+
+          // Quiet move (needed for quiescence search later)
+          if(!get_bit((side_to_move == white) ? occupancy_bitboards[black] : occupancy_bitboards[white], target_square)){
+            printf("quiet knight move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          else{
+            printf("knight capture move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          remove_bit(attacks, target_square);
+        }
+        remove_bit(current_bitboard, source_square);
+      }
+    }
 
     // Bishop moves
+    if((side_to_move == white) ? piece == B : piece == b) {
+      while(current_bitboard){
+        source_square = ls1b_index(current_bitboard);
+        attacks = generate_bishop_attacks_magic(source_square, occupancy_bitboards[2]) & ((side_to_move == white) ? ~occupancy_bitboards[white]: ~occupancy_bitboards[black]);
+
+        while(attacks){
+          target_square = ls1b_index(attacks);
+
+          // Quiet move (needed for quiescence search later)
+          if(!get_bit((side_to_move == white) ? occupancy_bitboards[black] : occupancy_bitboards[white], target_square)){
+            printf("quiet bishop move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          else{
+            printf("bishop capture move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          remove_bit(attacks, target_square);
+        }
+        remove_bit(current_bitboard, source_square);
+      }
+    }
 
     // Queen moves
+    if((side_to_move == white) ? piece == Q : piece == q) {
+      while(current_bitboard){
+        source_square = ls1b_index(current_bitboard);
+        attacks = generate_queen_attacks(source_square, occupancy_bitboards[2]) & ((side_to_move == white) ? ~occupancy_bitboards[white]: ~occupancy_bitboards[black]);
+
+        while(attacks){
+          target_square = ls1b_index(attacks);
+
+          // Quiet move (needed for quiescence search later)
+          if(!get_bit((side_to_move == white) ? occupancy_bitboards[black] : occupancy_bitboards[white], target_square)){
+            printf("quiet queen move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          else{
+            printf("queen capture move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          remove_bit(attacks, target_square);
+        }
+        remove_bit(current_bitboard, source_square);
+      }
+    }
 
     // King moves
+    if((side_to_move == white) ? piece == K : piece == k) {
+      while(current_bitboard){
+        source_square = ls1b_index(current_bitboard);
+        attacks = king_attacks_table[source_square] & ((side_to_move == white) ? ~occupancy_bitboards[white]: ~occupancy_bitboards[black]);
+
+        while(attacks){
+          target_square = ls1b_index(attacks);
+
+          // Quiet move (needed for quiescence search later)
+          if(!get_bit((side_to_move == white) ? occupancy_bitboards[black] : occupancy_bitboards[white], target_square)){
+            printf("quiet king move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          else{
+            printf("king capture move: %s%s\n", index_to_square_name[source_square], index_to_square_name[target_square]);
+          }
+          remove_bit(attacks, target_square);
+        }
+        remove_bit(current_bitboard, source_square);
+      }
+    }
   }
   
 }
@@ -812,7 +1016,7 @@ void init_all() {
 
 int main() {
   init_all();
-  parse_fen("r3k2r/pPppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPppPPP/R3K2R b KQkq - 0 1 ");
+  parse_fen("r3k2r/pPppqpb1/bn2pnp1/3PN3/1p2P3/2B2Q1p/PPPppPPP/R3K2R w KQkq - 0 1 ");
   print_board();
   generate_moves();
 
