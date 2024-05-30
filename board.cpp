@@ -149,6 +149,33 @@ int castle;
 
 enum castle_flags{w_kside = 1, w_qside = 2, b_kside = 4, b_qside = 8};
 
+/*
+                           castling   move     in      in
+                              right update     binary  decimal
+
+ king & rooks didn't move:     1111 & 1111  =  1111    15
+
+        white king  moved:     1111 & 1100  =  1100    12
+  white king's rook moved:     1111 & 1110  =  1110    14
+ white queen's rook moved:     1111 & 1101  =  1101    13
+     
+         black king moved:     1111 & 0011  =  0011    3
+  black king's rook moved:     1111 & 1011  =  1011    11
+ black queen's rook moved:     1111 & 0111  =  0111    7
+
+*/
+
+const int castling_rights[64] = {
+  13, 15, 15, 15, 15, 15, 15, 7, 
+  15, 15, 15, 15, 15, 15, 15, 15, 
+  15, 15, 15, 15, 15, 15, 15, 15, 
+  15, 15, 15, 15, 15, 15, 15, 15, 
+  12, 15, 15, 15, 15, 15, 15, 3, 
+  15, 15, 15, 15, 15, 15, 15, 15, 
+  15, 15, 15, 15, 15, 15, 15, 15, 
+  14, 15, 15, 15, 15, 15, 15, 11
+};
+
 // Precalculated bit counts for bishop/rook masks
 const int bishop_mask_bit_counts[64] {
   6, 5, 5, 5, 5, 5, 5, 6, 
@@ -1137,7 +1164,7 @@ int make_move(int move, int move_flag) {
     int capture = get_move_capture(move);
     int double_push = get_move_double_push(move);
     int enpassant = get_move_enpassant(move);
-    int castle = get_move_castle(move);
+    int current_castle = get_move_castle(move);
 
     // move piece
     remove_bit(piece_bitboards[piece], source_square);
@@ -1188,7 +1215,7 @@ int make_move(int move, int move_flag) {
     }
 
     // handling castling moves
-    if(castle){
+    if(current_castle){
       switch (target_square)
       {
         // White kingside
@@ -1216,6 +1243,10 @@ int make_move(int move, int move_flag) {
           break;
       }
     }
+
+    // Update castling rights
+    castle &= castling_rights[source_square];
+    castle &= castling_rights[target_square];
   }
 
   return 0;
