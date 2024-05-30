@@ -1091,10 +1091,7 @@ void generate_moves(moves *move_list) {
       }
     }
   }
-  
 }
-
-
 
 void init_all() {
   // Precalculated attack tables for leaping pieces
@@ -1107,13 +1104,145 @@ void init_all() {
   init_sliding_pieces_tables(rook);
 }
 
+// preserve board state
+#define copy_board()                                                            \
+    U64 bitboards_copy[12], occupancies_copy[3];                                \
+    int side_copy, enpassant_copy, castle_copy;                                 \
+    memcpy(bitboards_copy, piece_bitboards, sizeof(piece_bitboards));           \
+    memcpy(occupancies_copy, occupancy_bitboards, sizeof(occupancy_bitboards)); \
+    side_copy = side_to_move;                                                   \
+    enpassant_copy = en_passant_square;                                         \
+    castle_copy = castle;
+
+// restore board state
+#define take_back()                                                             \
+    memcpy(piece_bitboards, bitboards_copy, sizeof(piece_bitboards));           \
+    memcpy(occupancy_bitboards, occupancies_copy, sizeof(occupancy_bitboards)); \
+    side_to_move = side_copy;                                                   \
+    en_passant_square = enpassant_copy;                                         \
+    castle = castle_copy;
+
+// move types
+enum {all_moves, only_captures};
+
+// make move
+int make_move(int move, int move_flag) {
+  if(move_flag == all_moves) {
+    copy_board();
+
+    int source_square = get_move_source(move);
+    int target_square = get_move_target(move);
+    int piece = get_move_piece(move);
+    int promoted = get_move_promoted(move);
+    int capture = get_move_capture(move);
+    int double_push = get_move_double_push(move);
+    int enpassant = get_move_enpassant(move);
+    int castle = get_move_castle(move);
+
+    // move piece
+    remove_bit(piece_bitboards[piece], source_square);
+    set_bit(piece_bitboards[piece], target_square);
+
+    // handling captures
+    if(capture){
+      int start_piece, end_piece;
+
+      if(side_to_move == white){
+        start_piece = p;
+        end_piece = k;
+      }
+      else{
+        start_piece = P;
+        end_piece = K;
+      }
+
+      for (int current_piece = start_piece; current_piece <= end_piece; current_piece++)
+      {
+        if(get_bit(piece_bitboards[current_piece], target_square)){
+          remove_bit(piece_bitboards[current_piece], target_square);
+          break;
+        }
+      }
+    }
+
+    // handling promotions
+    if(promoted){
+      // erase existing pawn
+      remove_bit(piece_bitboards[(side_to_move == white) ? P : p], target_square);
+      set_bit(piece_bitboards[promoted], target_square);
+    }
+
+    // handling enpassant captures
+    if(enpassant){
+      // remove captured pawn
+      (side_to_move == white) ? remove_bit(piece_bitboards[p], target_square - 1) : 
+                                remove_bit(piece_bitboards[P], target_square + 1);
+    }
+
+    // reset enpassant square
+    en_passant_square = -1;
+
+    // handle double pawn push
+    if(double_push){
+      (side_to_move == white) ? (en_passant_square = target_square - 1) : (en_passant_square = target_square + 1);
+    }
+
+    // handling castling moves
+    if(castle){
+      switch (target_square)
+      {
+        // White kingside
+        case g1:
+          remove_bit(piece_bitboards[R], h1);
+          set_bit(piece_bitboards[R], f1);
+          break;
+        
+        // White queenside
+        case c1:
+          remove_bit(piece_bitboards[R], a1);
+          set_bit(piece_bitboards[R], d1);
+          break;
+
+        // Black kingside
+        case g8:
+          remove_bit(piece_bitboards[r], h8);
+          set_bit(piece_bitboards[r], f8);
+          break;
+
+        // Black queenside
+        case c8:
+          remove_bit(piece_bitboards[r], a8);
+          set_bit(piece_bitboards[r], d8);
+          break;
+      }
+    }
+  }
+
+  return 0;
+}
+
 int main() {
   init_all();
   parse_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ");
-  moves move_list[1];
   print_board();
+  // Preserve board state
+  moves move_list[1];
   generate_moves(move_list);
-  print_move_list(move_list);
+  
+  for (int move_count = 0; move_count < move_list->count; move_count++)
+  {
+    int move = move_list->moves[move_count];
+
+    copy_board();
+    make_move(move, all_moves);
+    print_board();
+    getchar();
+
+    take_back();
+    print_board();
+    getchar();
+  }
+  
   
   return 0;
 }
