@@ -5,6 +5,7 @@
 #include <string.h>
 #include <string>
 #include <unordered_map>
+#include <chrono>
 #include "board.h"
 #include "magic.h"
 
@@ -40,7 +41,7 @@ typedef std::uint64_t U64;
 
 char * start_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ";
 char * test_fen = "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 ";
-char * tricky_position_fen =  "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ";
+char * tricky_position_fen =  "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
 
 const U64 rank_1 {0x0101010101010101};
 const U64 rank_2 {0x0202020202020202};
@@ -1247,33 +1248,93 @@ int make_move(int move, int move_flag) {
     // Update castling rights
     castle &= castling_rights[source_square];
     castle &= castling_rights[target_square];
+
+    // Reset occupancies
+    memset(occupancy_bitboards, 0, sizeof(occupancy_bitboards));
+
+    // Set occupancies
+    for (int piece = P; piece <= K; piece++)
+    {
+      occupancy_bitboards[white] |= piece_bitboards[piece];
+    }
+
+    for (int piece = p; piece <= k; piece++)
+    {
+      occupancy_bitboards[black] |= piece_bitboards[piece];
+    }
+
+    occupancy_bitboards[2] |= occupancy_bitboards[white];
+    occupancy_bitboards[2] |= occupancy_bitboards[black];
+
+    // Change side to move
+    side_to_move ^= 1;
+
+    // Make sure king is not in check
+    if(is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[k]) : ls1b_index(piece_bitboards[K]), side_to_move)){
+      take_back();
+      // return illegal move
+      return 0;
+    }
+
+    else{
+      // legal move
+      return 1;
+    }
   }
 
-  return 0;
+  // capture moves
+  else
+  {
+    // make sure move is the capture
+    if (get_move_capture(move))
+        make_move(move, all_moves);
+    
+    // otherwise the move is not a capture
+    else
+        // don't make it
+        return 0;
+  }
+}
+
+// Leaf nodes
+U64 nodes = 0;
+
+// Perft driver
+void perft_driver(int depth){
+  if(depth == 0){
+    nodes++;
+    return;
+  }
+
+  moves move_list[1];
+  generate_moves(move_list);
+
+  for (int move_count = 0; move_count < move_list->count; move_count++)
+  {
+    copy_board();
+    if(!make_move(move_list->moves[move_count], all_moves)){
+      continue;
+    }
+
+    perft_driver(depth - 1);
+    take_back();
+  }
 }
 
 int main() {
   init_all();
-  parse_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ");
+  parse_fen(start_position_fen);
   print_board();
-  // Preserve board state
-  moves move_list[1];
-  generate_moves(move_list);
-  
-  for (int move_count = 0; move_count < move_list->count; move_count++)
-  {
-    int move = move_list->moves[move_count];
 
-    copy_board();
-    make_move(move, all_moves);
-    print_board();
-    getchar();
-
-    take_back();
-    print_board();
-    getchar();
-  }
+  // timer
+  auto start = std::chrono::high_resolution_clock::now();
   
+  // perft testing
+  perft_driver(6);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  printf("Milliseconds: %llu\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+  printf("Nodes: %llu\n", nodes);
   
   return 0;
 }
