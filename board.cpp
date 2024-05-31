@@ -41,7 +41,7 @@ typedef std::uint64_t U64;
 
 char * start_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ";
 char * test_fen = "r3k2r/1q2pppp/3p4/1ppPn3/n6P/2P4Q/PPBBPPP1/R3KR2 w Qk c6 0 1 ";
-char * tricky_position_fen =  "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+char * tricky_position_fen =  "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ";
 
 const U64 rank_1 {0x0101010101010101};
 const U64 rank_2 {0x0202020202020202};
@@ -1380,13 +1380,218 @@ void perft_test(int depth) {
   printf("Time (ms): %llu\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 }
 
+// Search
+void search_position(int depth){
+  // best move placeholder
+  printf("bestmove d2d4");
+}
+
+// UCI protocol
+int parse_move(char * move_string){
+  moves move_list[1];
+  generate_moves(move_list);
+
+  int source_square = 8 * (move_string[0] - 'a') + (move_string[1] - '1');
+  int target_square = 8 * (move_string[2] - 'a') + (move_string[3] - '1');
+
+  // printf("source square: %d %s\n", source_square, index_to_square_name[source_square]);
+  // printf("target square: %d %s\n", target_square, index_to_square_name[target_square]);
+
+  // loop over the moves within a move list
+  for (int move_count = 0; move_count < move_list->count; move_count++)
+  {
+    // init move
+    int move = move_list->moves[move_count];
+    
+    // make sure source & target squares are available within the generated move
+    if (source_square == get_move_source(move) && target_square == get_move_target(move))
+    {
+      // init promoted piece
+      int promoted_piece = get_move_promoted(move);
+      
+      // promoted piece is available
+      if (promoted_piece)
+      {
+        // promoted to queen
+        if ((promoted_piece == Q || promoted_piece == q) && move_string[4] == 'q')
+          // return legal move
+          return move;
+        
+        // promoted to rook
+        else if ((promoted_piece == R || promoted_piece == r) && move_string[4] == 'r')
+          // return legal move
+          return move;
+        
+        // promoted to bishop
+        else if ((promoted_piece == B || promoted_piece == b) && move_string[4] == 'b')
+          // return legal move
+          return move;
+        
+        // promoted to knight
+        else if ((promoted_piece == N || promoted_piece == n) && move_string[4] == 'n')
+          // return legal move
+          return move;
+        
+        // continue the loop on possible wrong promotions (e.g. "e7e8f")
+        continue;
+      }
+      
+      // return legal move
+      return move;
+    }
+  }
+  return 0;
+}
+
+// parse UCI "position" command
+void parse_position(char *command){
+  // shift pointer to right of next token
+  command += 9;
+  char *current_char = command;
+
+  // parse UCI "startpos" command
+  if(strncmp(command, "startpos", 8) == 0){
+    parse_fen(start_position_fen);
+  }
+
+  // parse UCI "fen" command
+  else{
+    current_char = strstr(command, "fen");
+
+    if (current_char == NULL){
+      parse_fen(start_position_fen);
+    }
+
+    // found fen substring
+    else{
+      current_char += 4;
+      parse_fen(current_char);
+    }
+  }
+
+  current_char = strstr(command, "moves");
+
+  if(current_char != NULL){
+    
+    // move to next token
+    current_char += 6;
+
+    // parse all the moves
+    while(*current_char){
+      int move = parse_move(current_char);
+
+      // if no more moves
+      if(move == 0){
+        break;
+      }
+
+      make_move(move, all_moves);
+
+      // move pointer to end of current move
+      while(*current_char && *current_char != ' ') {
+        current_char++;
+      }
+
+      if(*current_char == '\0') break;
+
+      // go to the next move
+      current_char++;
+    }
+  }
+  print_board();
+}
+
+// parse UCI "go" command
+void parse_go(char *command){
+  int depth = -1;
+
+  char *current_depth = NULL;
+
+  if(current_depth = strstr(command, "depth")){
+    // convert string to int and assign result value to depth
+    depth = atoi(current_depth + 6);
+  }
+
+  else{
+    // default depth 6
+    depth = 6;
+  }
+  search_position(depth);
+}
+
+// main UCI loop
+void uci_loop(){
+  // reset STDIN & STDOUT buffers
+  setbuf(stdin, NULL);
+  setbuf(stdout, NULL);
+
+  // define user / GUI input buffer
+  char input[2000];
+
+  // print engine info
+  printf("id name BBC\n");
+  printf("id name Henry Li\n");
+  printf("uciok\n");
+
+  // main loop
+  while(true){
+    // reset user / GUI input
+    memset(input, 0, sizeof(input));
+
+    // make sure output reaches GUI
+    fflush(stdout);
+
+    // get user / GUI input
+    if(!fgets(input, 2000, stdin)){
+      continue;
+    }
+
+    // make sure input is available
+    if(input[0] == '\n'){
+      continue;
+    }
+
+    // parse UCI "isready" command
+    if(strncmp(input, "isready", 7) == 0){
+      printf("readyok\n");
+      continue;
+    }
+
+    // parse UCI "position" command
+    else if(strncmp(input, "position", 8) == 0){
+      parse_position(input);
+    }
+
+    // parse UCI "ucinewgame" command
+    else if(strncmp(input, "ucinewgame", 10) == 0){
+      parse_position("position startpos");
+    }
+
+    // parse UCI "go" command
+    else if(strncmp(input, "go", 2) == 0){
+      parse_go(input);
+    }
+
+    // parse UCI "quit" command
+    else if(strncmp(input, "quit", 4) == 0){
+      // exit main loop
+      break;
+    }
+
+    // parse UCI "uci" command
+    else if(strncmp(input, "uci", 3) == 0){
+      printf("id name BBC\n");
+      printf("id name Henry Li\n");
+      printf("uciok\n");
+    }
+  }
+}
+
 int main() {
   init_all();
-  parse_fen(start_position_fen);
-  print_board();
 
-  // perft testing
-  perft_test(6);
-  
+  // connect to the GUI
+  uci_loop();
+
   return 0;
 }
