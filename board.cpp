@@ -242,9 +242,16 @@ void add_move(moves *move_list, int move){
 }
 
 void print_move(int move) {
-  printf("%s%s%c\n", index_to_square_name[get_move_source(move)],
-                      index_to_square_name[get_move_target(move)],
-                      promoted_pieces[get_move_promoted(move)]);
+  if(get_move_promoted(move)) {
+    printf("%s%s%c\n", index_to_square_name[get_move_source(move)],
+                       index_to_square_name[get_move_target(move)],
+                       promoted_pieces[get_move_promoted(move)]);
+  }
+  else{
+    printf("%s%s\n", index_to_square_name[get_move_source(move)],
+                     index_to_square_name[get_move_target(move)]);
+  }
+
 }
 
 void print_move_list(moves *move_list) {
@@ -1321,20 +1328,65 @@ void perft_driver(int depth){
   }
 }
 
+// Perft test
+void perft_test(int depth) {
+  printf("\n     Performance test\n\n");
+  
+  // create move list instance
+  moves move_list[1];
+  
+  // generate moves
+  generate_moves(move_list);
+  
+  // init start time
+  auto start = std::chrono::high_resolution_clock::now();
+  
+  // loop over generated moves
+  for (int move_count = 0; move_count < move_list->count; move_count++)
+  {   
+    // preserve board state
+    copy_board();
+    
+    // make move
+    if (!make_move(move_list->moves[move_count], all_moves)){
+      // skip to the next move
+      continue;
+    }
+
+    
+    // cummulative nodes
+    U64 cummulative_nodes = nodes;
+    
+    // call perft driver recursively
+    perft_driver(depth - 1);
+    
+    // old nodes
+    U64 old_nodes = nodes - cummulative_nodes;
+    
+    // take back
+    take_back();
+    
+    // print move
+    printf("     move: %s%s%c  nodes: %ld\n", index_to_square_name[get_move_source(move_list->moves[move_count])],
+                                              index_to_square_name[get_move_target(move_list->moves[move_count])],
+                                              get_move_promoted(move_list->moves[move_count]) ? promoted_pieces[get_move_promoted(move_list->moves[move_count])] : ' ',
+                                              old_nodes);
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  
+  // print results
+  printf("\n    Depth: %d\n", depth);
+  printf("    Nodes: %ld\n", nodes);
+  printf("Time (ms): %llu\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+}
+
 int main() {
   init_all();
   parse_fen(start_position_fen);
   print_board();
 
-  // timer
-  auto start = std::chrono::high_resolution_clock::now();
-  
   // perft testing
-  perft_driver(6);
-
-  auto end = std::chrono::high_resolution_clock::now();
-  printf("Milliseconds: %llu\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-  printf("Nodes: %llu\n", nodes);
+  perft_test(6);
   
   return 0;
 }
