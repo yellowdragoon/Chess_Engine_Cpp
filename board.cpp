@@ -1380,10 +1380,352 @@ void perft_test(int depth) {
   printf("Time (ms): %llu\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 }
 
-// Search
-void search_position(int depth){
-  // best move placeholder
-  printf("bestmove d2d4");
+int material_score[12] = {
+    100,      // white pawn score
+    500,      // white rook scrore
+    300,      // white knight score
+    350,      // white bishop score
+   1000,      // white queen score
+  10000,      // white king score
+   -100,      // black pawn score
+   -500,      // black rook scrore
+   -300,      // black knight score
+   -350,      // black bishop score
+  -1000,      // black queen score
+ -10000,      // black king score
+};
+
+const int pawn_score[64] = 
+{
+  0,   0,   0,   5,  10,  20,  30,  90, 
+  0,   0,   0,   5,  10,  20,  30,  90, 
+  0,   0,   0,  10,  10,  20,  30,  90, 
+  0,  -10,   5,  20,  20,  30,  40,  90,
+  0,  -10,   5,  20,  20,  30,  40,  90,
+  0,   0,   0,   5,  10,  20,  30,  90, 
+  0,   0,   0,   5,  10,  20,  30,  90, 
+  0,   0,   0,   5,  10,  20,  30,  90  
+};
+
+// knight positional score
+const int knight_score[64] = 
+{
+  -5,  -5,  -5,  -5,  -5,  -5,  -5,  -5, 
+  -10,   0,   5,  10,  10,   5,   0,   0,
+    0,   0,  20,  20,  20,  20,   0,   0, 
+    0,   0,  20,  30,  30,  10,   0,   0, 
+    0,   0,  20,  30,  30,  10,   0,   0, 
+    0,   0,  20,  20,  20,  20,   0,   0, 
+  -10,   0,   5,  10,  10,   5,   0,   0,
+  -5,  -5,  -5,  -5,  -5,  -5,  -5,  -5  
+};
+
+// bishop positional score
+const int bishop_score[64] = 
+{
+     0,   0,   0,   0,   0,   0,   0,   0, 
+     0,   30,  10,  0,  0,   0,   0,   0,  
+    -10,  0,   0,  10,  10,   0,   0,   0, 
+     0,   0,   0,  20,  20,   10,   0,   0,
+     0,   0,   0,  20,  20,   10,   0,   0,
+     -10, 0,   0,  10,  10,   0,   0,   0, 
+     0,   30,  10,  0,   0,   0,   0,   0, 
+     0,   0,   0,   0,   0,   0,   0,   0  
+};
+
+// rook positional score
+const int rook_score[64] =
+{
+  0,  0,  0,  0,  0,  0, 50, 50,
+  0,  0,  0,  0,  0,  0, 50, 50,
+  0, 10, 10, 10, 10, 10, 50, 50,
+  20, 20, 20, 20, 20, 20, 50, 50,
+  20, 20, 20, 20, 20, 20, 50, 50,
+  0, 10, 10, 10, 10, 10, 50, 50,
+  0,  0,  0,  0,  0,  0, 50, 50,
+  0,  0,  0,  0,  0,  0, 50, 50
+};
+
+// king positional score
+const int king_score[64] = 
+{
+   0,   0,   0,   0,   0,   0,   0,   0,
+   0,   5,   0,   5,   5,   5,   0,   0,
+   5,   5,   5,  10,  10,   5,   5,   0,
+   0,  -5,  10,  20,  20,  10,   5,   0,
+  -15,  -5,  10,  20,  20,  10,   5,   0,
+   0,   0,   5,  10,  10,   5,   5,   0,
+   10,  5,   0,   5,   5,   5,   0,   0,
+   0,   0,   0,   0,   0,   0,   0,   0
+};
+
+// mirror positional score tables for opposite side
+const int mirror_score[128] =
+{
+  a8, a7, a6, a5, a4, a3, a2, a1,
+  b8, b7, b6, b5, b4, b3, b2, b1,
+  c8, c7, c6, c5, c4, c3, c2, c1,
+  d8, d7, d6, d5, d4, d3, d2, d1,
+  e8, e7, e6, e5, e4, e3, e2, e1,
+  f8, f7, f6, f5, f4, f3, f2, f1,
+  g8, g7, g6, g5, g4, g3, g2, g1,
+  h8, h7, h6, h5, h4, h3, h2, h1
+};
+
+int evaluate()
+{
+    int score = 0;
+    // current pieces bitboard copy
+    U64 bitboard;
+    int piece, square;
+    
+    // loop over piece bitboards
+    for (int bb_piece = P; bb_piece <= k; bb_piece++)
+    {
+        // init piece bitboard copy
+        bitboard = piece_bitboards[bb_piece];
+        
+        // loop over pieces within a bitboard
+        while (bitboard)
+        {
+            piece = bb_piece;
+            square = ls1b_index(bitboard);
+            score += material_score[piece];
+
+            // score positional piece scores
+            switch (piece)
+            {
+                // evaluate white pieces
+                case P: score += pawn_score[square]; break;
+                case N: score += knight_score[square]; break;
+                case B: score += bishop_score[square]; break;
+                case R: score += rook_score[square]; break;
+                case K: score += king_score[square]; break;
+
+                // evaluate black pieces
+                case p: score -= pawn_score[mirror_score[square]]; break;
+                case n: score -= knight_score[mirror_score[square]]; break;
+                case b: score -= bishop_score[mirror_score[square]]; break;
+                case r: score -= rook_score[mirror_score[square]]; break;
+                case k: score -= king_score[mirror_score[square]]; break;
+            }
+
+            // printf("%d %c %s\n", score, pieces_ascii[piece], index_to_square_name[square]);
+            
+            remove_bit(bitboard, square);
+        }
+    }
+    
+    // return final evaluation based on side
+    return (side_to_move == white) ? score : -score;
+}
+
+// half move counter
+int ply;
+
+// best move
+int best_move;
+
+// quiescence search
+static inline int quiescence(int alpha, int beta)
+{
+    // evaluate position
+    int evaluation = evaluate();
+    
+    // fail-hard beta cutoff
+    if (evaluation >= beta)
+    {
+        // node (move) fails high
+        return beta;
+    }
+    
+    // found a better move
+    if (evaluation > alpha)
+    {
+        // PV node (move)
+        alpha = evaluation;
+    }
+    
+    // create move list instance
+    moves move_list[1];
+    
+    // generate moves
+    generate_moves(move_list);
+    
+    // loop over moves within a movelist
+    for (int count = 0; count < move_list->count; count++)
+    {
+        // preserve board state
+        copy_board();
+        
+        // increment ply
+        ply++;
+        
+        // make sure to make only legal moves
+        if (make_move(move_list->moves[count], only_captures) == 0)
+        {
+            // decrement ply
+            ply--;
+            
+            // skip to next move
+            continue;
+        }
+
+        // score current move
+        int score = -quiescence(-beta, -alpha);
+        
+        // decrement ply
+        ply--;
+
+        // take move back
+        take_back();
+        
+        // fail-hard beta cutoff
+        if (score >= beta)
+        {
+            // node (move) fails high
+            return beta;
+        }
+        
+        // found a better move
+        if (score > alpha)
+        {
+            // PV node (move)
+            alpha = score;
+            
+        }
+    }
+    
+    // node (move) fails low
+    return alpha;
+}
+
+// negamax alpha beta search
+static inline int negamax(int alpha, int beta, int depth)
+{
+    // recurrsion escape condition
+    if (depth == 0){
+      // return evaluation
+      return quiescence(alpha, beta);
+    }
+
+    // increment nodes count
+    nodes++;
+
+    // is king in check
+    int in_check = is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[K]) : 
+                                                                ls1b_index(piece_bitboards[k]),
+                                                                side_to_move ^ 1);
+
+    // legal moves counter
+    int legal_moves = 0;
+    
+    // best move so far
+    int best_sofar;
+    
+    // old value of alpha
+    int old_alpha = alpha;
+    
+    // create move list instance
+    moves move_list[1];
+    
+    // generate moves
+    generate_moves(move_list);
+    
+    // loop over moves within a movelist
+    for (int count = 0; count < move_list->count; count++)
+    {
+        // preserve board state
+        copy_board();
+        
+        // increment ply
+        ply++;
+        
+        // make sure to make only legal moves
+        if (make_move(move_list->moves[count], all_moves) == 0)
+        {
+            // decrement ply
+            ply--;
+            
+            // skip to next move
+            continue;
+        }
+
+        legal_moves++;
+        
+        // score current move
+        int score = -negamax(-beta, -alpha, depth - 1);
+        
+        // decrement ply
+        ply--;
+
+        // take move back
+        take_back();
+        
+        // fail-hard beta cutoff
+        if (score >= beta)
+        {
+            // node (move) fails high
+            return beta;
+        }
+        
+        // found a better move
+        if (score > alpha)
+        {
+            // PV node (move)
+            alpha = score;
+            
+            // if root move
+            if (ply == 0)
+            {
+                // associate best move with the best score
+                best_sofar = move_list->moves[count];
+            }
+        }
+    }
+
+    // we don't have any legal moves to make in the current postion
+    if (legal_moves == 0)
+    {
+        // king is in check
+        if (in_check){
+          // return mating score (assuming closest distance to mating position)
+          return -49000 + ply;
+        }
+        
+        // king is not in check
+        else {
+          // return stalemate score
+          return 0;
+        }
+    }
+    
+    // found better move
+    if (old_alpha != alpha)
+    {
+      // init best move
+      best_move = best_sofar;
+    }
+    
+    // node (move) fails low
+    return alpha;
+}
+
+// search position for the best move
+void search_position(int depth)
+{
+    // find best move within a given position
+    int score = negamax(-50000, 50000, depth);
+    
+    if (best_move)
+    {
+      printf("info score cp %d depth %d nodes %ld\n", score, depth, nodes);
+  
+      // best move placeholder
+      printf("bestmove ");
+      print_move(best_move);
+      printf("\n");
+    }
 }
 
 // UCI protocol
@@ -1580,7 +1922,7 @@ void uci_loop(){
 
     // parse UCI "uci" command
     else if(strncmp(input, "uci", 3) == 0){
-      printf("id name BBC\n");
+      printf("id author BBC\n");
       printf("id name Henry Li\n");
       printf("uciok\n");
     }
@@ -1589,9 +1931,24 @@ void uci_loop(){
 
 int main() {
   init_all();
+    // parse_fen(start_position_fen);
+    // perft_test(7);
 
-  // connect to the GUI
-  uci_loop();
+    // debug mode variable
+    int debug = 0;
+    
+    // if debugging
+    if (debug)
+    {
+      // parse fen
+      parse_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1 ");
+      print_board();
+      printf("score: %d\n", evaluate());
+    }
+    
+    else{
+      uci_loop();
+    }
 
   return 0;
 }
