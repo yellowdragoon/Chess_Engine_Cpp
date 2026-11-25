@@ -1628,177 +1628,163 @@ static int mvv_lva[12][12] = {
 };
 
 
-// half move counter
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+#define MAX_PLY 128
+#define INF 50000
+#define MATE_VALUE 49000
+// scores beyond this are mate scores
+#define MATE_SCORE 48000
+
+// distance from the root of the current node
 int ply;
 
-// best move
-int best_move;
+// killer moves [id][ply]: quiet moves that caused a beta cutoff at this ply
+int killer_moves[2][MAX_PLY];
 
-// score moves
-static inline int score_move(int move)
+// history moves [piece][square]: quiet moves that raised alpha
+int history_moves[12][64];
+
+// triangular principal variation table
+int pv_length[MAX_PLY];
+int pv_table[MAX_PLY][MAX_PLY];
+
+// ----- time control -----
+
+long long start_time = 0;
+long long soft_stop_time = 0;   // don't start a new iteration after this
+long long hard_stop_time = 0;   // abort the search after this
+bool time_set = false;
+bool stopped = false;
+U64 node_limit = 0;             // 0 = no limit
+int current_iteration = 0;
+
+static inline long long now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static inline void check_time() {
+  // always finish depth 1 so there is a move to play
+  if (current_iteration <= 1) return;
+  if (time_set && now_ms() >= hard_stop_time) stopped = true;
+  if (node_limit && nodes >= node_limit) stopped = true;
+}
+
+// ----- transposition table -----
+
+enum { hash_exact, hash_alpha, hash_beta };
+#define NO_HASH_ENTRY 100000
+
+typedef struct {
+  U64 key;
+  int move;
+  int score;
+  short depth;
+  short flag;
+} tt_entry;
+
+tt_entry *transposition_table = NULL;
+U64 tt_entries = 0;
+
+void init_tt(int megabytes) {
+  free(transposition_table);
+  U64 bytes = (U64)megabytes * 1024 * 1024;
+  // round down to a power of two so we can index with a mask
+  tt_entries = 1;
+  while (tt_entries * 2 * sizeof(tt_entry) <= bytes) tt_entries *= 2;
+  transposition_table = (tt_entry *)calloc(tt_entries, sizeof(tt_entry));
+}
+
+void clear_tt() {
+  memset(transposition_table, 0, tt_entries * sizeof(tt_entry));
+}
+
+// Returns a score if the entry is deep enough to cut, else NO_HASH_ENTRY.
+// Always reports the stored best move through *tt_move.
+static inline int probe_tt(int alpha, int beta, int depth, int *tt_move) {
+  tt_entry *entry = &transposition_table[hash_key & (tt_entries - 1)];
+  if (entry->key != hash_key) return NO_HASH_ENTRY;
+  *tt_move = entry->move;
+  if (entry->depth < depth) return NO_HASH_ENTRY;
+
+  // mate scores are stored relative to the node, convert back to the root
+  int score = entry->score;
+  if (score < -MATE_SCORE) score += ply;
+  if (score > MATE_SCORE) score -= ply;
+
+  if (entry->flag == hash_exact) return score;
+  if (entry->flag == hash_alpha && score <= alpha) return alpha;
+  if (entry->flag == hash_beta && score >= beta) return beta;
+  return NO_HASH_ENTRY;
+}
+
+static inline void store_tt(int score, int depth, int flag, int move) {
+  tt_entry *entry = &transposition_table[hash_key & (tt_entries - 1)];
+  if (score < -MATE_SCORE) score -= ply;
+  if (score > MATE_SCORE) score += ply;
+  entry->key = hash_key;
+  entry->move = move;
+  entry->score = score;
+  entry->depth = depth;
+  entry->flag = flag;
+}
+
+// ----- move ordering -----
+
+// Order: TT move, captures (MVV-LVA), killers, then history
+static inline int score_move(int move, int tt_move)
 {
+    if (move == tt_move) return 30000;
+
     // score capture move
     if (get_move_capture(move))
     {
-        // init target piece
+        // init target piece (en passant captures leave the target empty: pawn)
         int target_piece = P;
-        
+
         // pick up bitboard piece index ranges depending on side
         int start_piece, end_piece;
-        
-        // pick up side to move
         if (side_to_move == white) { start_piece = p; end_piece = k; }
         else { start_piece = P; end_piece = K; }
-        
+
         // loop over bitboards opposite to the current side to move
         for (int bb_piece = start_piece; bb_piece <= end_piece; bb_piece++)
         {
-            // if there's a piece on the target square
             if (get_bit(piece_bitboards[bb_piece], get_move_target(move)))
             {
-                // remove it from corresponding bitboard
                 target_piece = bb_piece;
                 break;
             }
         }
-                
+
         // score move by MVV LVA lookup [source piece][target piece]
-        return mvv_lva[get_move_piece(move)][target_piece];
+        return mvv_lva[get_move_piece(move)][target_piece] + 10000;
     }
-    
+
     // score quiet move
-    else
-    {
-    
-    }
-    
-    return 0;
+    if (killer_moves[0][ply] == move) return 9000;
+    if (killer_moves[1][ply] == move) return 8000;
+    return history_moves[get_move_piece(move)][get_move_target(move)];
 }
 
-// sort moves in descending order
-static inline void sort_moves(moves *move_list)
-{
-  // move scores
-  int move_scores[move_list->count];
-
-  // score all the moves within a move list
-  for (int count = 0; count < move_list->count; count++){
-    // score move
-    move_scores[count] = score_move(move_list->moves[count]);
-  }
-  // loop over current move within a move list
-  for (int current_move = 0; current_move < move_list->count; current_move++)
-  {
-      // loop over next move within a move list
-      for (int next_move = current_move + 1; next_move < move_list->count; next_move++)
-      {
-          // compare current and next move scores
-          if (move_scores[current_move] < move_scores[next_move])
-          {
-              // swap scores
-              int temp_score = move_scores[current_move];
-              move_scores[current_move] = move_scores[next_move];
-              move_scores[next_move] = temp_score;
-              
-              // swap moves
-              int temp_move = move_list->moves[current_move];
-              move_list->moves[current_move] = move_list->moves[next_move];
-              move_list->moves[next_move] = temp_move;
-          }
-      }
+// Selection sort step: bring the best remaining move to index `start`
+static inline void pick_move(moves *move_list, int *scores, int start) {
+  int best = start;
+  for (int i = start + 1; i < move_list->count; i++)
+    if (scores[i] > scores[best]) best = i;
+  if (best != start) {
+    int tmp_move = move_list->moves[start];
+    move_list->moves[start] = move_list->moves[best];
+    move_list->moves[best] = tmp_move;
+    int tmp_score = scores[start];
+    scores[start] = scores[best];
+    scores[best] = tmp_score;
   }
 }
 
-// print move scores
-void print_move_scores(moves *move_list)
-{
-    printf("     Move scores:\n\n");
-        
-    // loop over moves within a move list
-    for (int count = 0; count < move_list->count; count++)
-    {
-        printf("     move: ");
-        print_move(move_list->moves[count]);
-        printf(" score: %d\n", score_move(move_list->moves[count]));
-    }
-}
-
-// quiescence search
-static inline int quiescence(int alpha, int beta)
-{
-    nodes++;
-    // evaluate position
-    int evaluation = evaluate();
-    
-    // fail-hard beta cutoff
-    if (evaluation >= beta)
-    {
-        // node (move) fails high
-        return beta;
-    }
-    
-    // found a better move
-    if (evaluation > alpha)
-    {
-        // PV node (move)
-        alpha = evaluation;
-    }
-    
-    // create move list instance
-    moves move_list[1];
-    
-    // generate moves
-    generate_moves(move_list);
-    
-    // loop over moves within a movelist
-    for (int count = 0; count < move_list->count; count++)
-    {
-        // preserve board state
-        copy_board();
-        
-        // increment ply
-        ply++;
-        
-        // make sure to make only legal moves
-        if (make_move(move_list->moves[count], only_captures) == 0)
-        {
-            // decrement ply
-            ply--;
-            
-            // skip to next move
-            continue;
-        }
-
-        // score current move
-        int score = -quiescence(-beta, -alpha);
-        
-        // decrement ply
-        ply--;
-
-        // take move back
-        take_back();
-        
-        // fail-hard beta cutoff
-        if (score >= beta)
-        {
-            // node (move) fails high
-            return beta;
-        }
-        
-        // found a better move
-        if (score > alpha)
-        {
-            // PV node (move)
-            alpha = score;
-            
-        }
-    }
-    
-    // node (move) fails low
-    return alpha;
-}
-
-// negamax alpha beta search
 // Has the current position occurred before since the last irreversible move?
 static inline bool is_repetition() {
   int stop = repetition_index - fifty;
@@ -1809,137 +1795,284 @@ static inline bool is_repetition() {
   return false;
 }
 
+// ----- quiescence search -----
+
+static inline int quiescence(int alpha, int beta)
+{
+    if ((nodes & 2047) == 0) check_time();
+    if (stopped) return 0;
+
+    nodes++;
+
+    if (ply >= MAX_PLY - 1) return evaluate();
+
+    // stand pat
+    int evaluation = evaluate();
+    if (evaluation >= beta) return beta;
+    if (evaluation > alpha) alpha = evaluation;
+
+    moves move_list[1];
+    generate_moves(move_list);
+
+    int scores[256];
+    for (int i = 0; i < move_list->count; i++)
+      scores[i] = score_move(move_list->moves[i], 0);
+
+    for (int count = 0; count < move_list->count; count++)
+    {
+        pick_move(move_list, scores, count);
+
+        copy_board();
+        ply++;
+
+        // only legal captures
+        if (make_move(move_list->moves[count], only_captures) == 0)
+        {
+            ply--;
+            continue;
+        }
+
+        int score = -quiescence(-beta, -alpha);
+
+        ply--;
+        take_back();
+
+        if (stopped) return 0;
+
+        if (score >= beta) return beta;
+        if (score > alpha) alpha = score;
+    }
+
+    return alpha;
+}
+
+// ----- main search -----
+
+static inline bool has_non_pawn_material(int side) {
+  if (side == white)
+    return piece_bitboards[N] | piece_bitboards[B] | piece_bitboards[R] | piece_bitboards[Q];
+  return piece_bitboards[n] | piece_bitboards[b] | piece_bitboards[r] | piece_bitboards[q];
+}
+
+// negamax alpha beta search with PVS, null move pruning and late move reductions
 static inline int negamax(int alpha, int beta, int depth)
 {
+    pv_length[ply] = ply;
+
     // draw by repetition (twofold inside the tree) or fifty-move rule
     if (ply && (is_repetition() || fifty >= 100))
       return 0;
 
-    // recurrsion escape condition
-    if (depth == 0){
-      // return evaluation
-      return quiescence(alpha, beta);
-    }
+    if (ply >= MAX_PLY - 1) return evaluate();
 
-    // increment nodes count
-    nodes++;
+    bool pv_node = beta - alpha > 1;
+
+    // transposition table cutoff (not on PV nodes, so the PV stays intact)
+    int tt_move = 0;
+    int tt_score = probe_tt(alpha, beta, depth, &tt_move);
+    if (ply && !pv_node && tt_score != NO_HASH_ENTRY)
+      return tt_score;
 
     // is king in check
-    int in_check = is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[K]) : 
+    int in_check = is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[K]) :
                                                                 ls1b_index(piece_bitboards[k]),
                                                                 side_to_move ^ 1);
 
-    // legal moves counter
-    int legal_moves = 0;
-    
-    // best move so far
-    int best_sofar;
-    
-    // old value of alpha
-    int old_alpha = alpha;
-    
-    // create move list instance
+    // check extension
+    if (in_check) depth++;
+
+    if (depth <= 0) return quiescence(alpha, beta);
+
+    if ((nodes & 2047) == 0) check_time();
+    if (stopped) return 0;
+
+    nodes++;
+
+    // null move pruning: if passing still fails high, this node is very likely a cutoff
+    if (!pv_node && !in_check && ply && depth >= 3 && has_non_pawn_material(side_to_move))
+    {
+        copy_board();
+        ply++;
+        repetition_table[++repetition_index] = hash_key;
+
+        en_passant_square = -1;
+        side_to_move ^= 1;
+        hash_key = generate_hash_key();
+
+        int score = -negamax(-beta, -beta + 1, depth - 1 - 2);
+
+        ply--;
+        repetition_index--;
+        take_back();
+
+        if (stopped) return 0;
+        if (score >= beta) return beta;
+    }
+
     moves move_list[1];
-    
-    // generate moves
     generate_moves(move_list);
-    
-    // loop over moves within a movelist
+
+    int scores[256];
+    for (int i = 0; i < move_list->count; i++)
+      scores[i] = score_move(move_list->moves[i], tt_move);
+
+    int legal_moves = 0;
+    int best_move_here = 0;
+    int hash_flag = hash_alpha;
+
     for (int count = 0; count < move_list->count; count++)
     {
-        // preserve board state
+        pick_move(move_list, scores, count);
+        int move = move_list->moves[count];
+
         copy_board();
-        
-        // increment ply
         ply++;
-        
-        // make sure to make only legal moves
-        if (make_move(move_list->moves[count], all_moves) == 0)
+
+        if (make_move(move, all_moves) == 0)
         {
-            // decrement ply
             ply--;
-            
-            // skip to next move
             continue;
         }
 
-        legal_moves++;
         repetition_table[++repetition_index] = hash_key;
-        
-        // score current move
-        int score = -negamax(-beta, -alpha, depth - 1);
-        
-        // decrement ply
+
+        int score;
+        bool quiet = !get_move_capture(move) && !get_move_promoted(move);
+
+        if (legal_moves == 0)
+        {
+            // full window on the first move
+            score = -negamax(-beta, -alpha, depth - 1);
+        }
+        else
+        {
+            // late move reduction for quiet moves ordered late
+            if (legal_moves >= 4 && depth >= 3 && !in_check && quiet)
+                score = -negamax(-alpha - 1, -alpha, depth - 2);
+            else
+                score = alpha + 1;
+
+            // principal variation search: null window, re-search if it beats alpha
+            if (score > alpha)
+            {
+                score = -negamax(-alpha - 1, -alpha, depth - 1);
+                if (score > alpha && score < beta)
+                    score = -negamax(-beta, -alpha, depth - 1);
+            }
+        }
+
+        legal_moves++;
+
         ply--;
         repetition_index--;
-
-        // take move back
         take_back();
-        
-        // fail-hard beta cutoff
-        if (score >= beta)
-        {
-            // node (move) fails high
-            return beta;
-        }
-        
-        // found a better move
+
+        if (stopped) return 0;
+
         if (score > alpha)
         {
-            // PV node (move)
             alpha = score;
-            
-            // if root move
-            if (ply == 0)
+            best_move_here = move;
+            hash_flag = hash_exact;
+
+            if (quiet)
+                history_moves[get_move_piece(move)][get_move_target(move)] += depth * depth;
+
+            // update the principal variation
+            pv_table[ply][ply] = move;
+            for (int next = ply + 1; next < pv_length[ply + 1]; next++)
+                pv_table[ply][next] = pv_table[ply + 1][next];
+            pv_length[ply] = pv_length[ply + 1];
+
+            // fail-hard beta cutoff
+            if (score >= beta)
             {
-                // associate best move with the best score
-                best_sofar = move_list->moves[count];
+                store_tt(beta, depth, hash_beta, move);
+                if (quiet)
+                {
+                    killer_moves[1][ply] = killer_moves[0][ply];
+                    killer_moves[0][ply] = move;
+                }
+                return beta;
             }
         }
     }
 
-    // we don't have any legal moves to make in the current postion
+    // no legal moves: checkmate or stalemate
     if (legal_moves == 0)
-    {
-        // king is in check
-        if (in_check){
-          // return mating score (assuming closest distance to mating position)
-          return -49000 + ply;
-        }
-        
-        // king is not in check
-        else {
-          // return stalemate score
-          return 0;
-        }
-    }
-    
-    // found better move
-    if (old_alpha != alpha)
-    {
-      // init best move
-      best_move = best_sofar;
-    }
-    
-    // node (move) fails low
+        return in_check ? -MATE_VALUE + ply : 0;
+
+    store_tt(alpha, depth, hash_flag, best_move_here);
     return alpha;
 }
 
-// search position for the best move
-void search_position(int depth)
+static void print_score(int score) {
+  if (score > MATE_SCORE)
+    printf("score mate %d", (MATE_VALUE - score) / 2 + 1);
+  else if (score < -MATE_SCORE)
+    printf("score mate %d", -(MATE_VALUE + score) / 2);
+  else
+    printf("score cp %d", score);
+}
+
+// last completed iteration's score, used by data generation
+int last_search_score = 0;
+
+// iterative deepening driver; prints UCI info lines and the best move
+int search_position(int max_depth, bool print_info = true)
 {
-    // find best move within a given position
-    int score = negamax(-50000, 50000, depth);
-    
-    if (best_move)
+    nodes = 0;
+    stopped = false;
+    memset(killer_moves, 0, sizeof(killer_moves));
+    memset(history_moves, 0, sizeof(history_moves));
+    memset(pv_table, 0, sizeof(pv_table));
+    memset(pv_length, 0, sizeof(pv_length));
+
+    int best = 0;
+    int best_score = 0;
+
+    for (int depth = 1; depth <= max_depth; depth++)
     {
-      printf("info score cp %d depth %d nodes %llu\n", score, depth, nodes);
-  
-      // best move placeholder
+        current_iteration = depth;
+        ply = 0;
+        int score = negamax(-INF, INF, depth);
+
+        // an aborted iteration can't be trusted; keep the previous result
+        if (stopped) break;
+
+        best = pv_table[0][0];
+        best_score = score;
+
+        if (print_info)
+        {
+            long long elapsed = now_ms() - start_time;
+            printf("info depth %d ", depth);
+            print_score(score);
+            printf(" nodes %llu time %lld nps %llu pv", nodes, elapsed,
+                   elapsed > 0 ? nodes * 1000 / elapsed : 0ULL);
+            for (int i = 0; i < pv_length[0]; i++) {
+              printf(" ");
+              print_move(pv_table[0][i]);
+            }
+            printf("\n");
+        }
+
+        // no point searching deeper once a forced mate is found
+        if (best_score > MATE_SCORE || best_score < -MATE_SCORE) break;
+        if (time_set && now_ms() >= soft_stop_time) break;
+        if (node_limit && nodes >= node_limit) break;
+    }
+
+    last_search_score = best_score;
+
+    if (print_info)
+    {
       printf("bestmove ");
-      print_move(best_move);
+      if (best) print_move(best);
+      else printf("0000");
       printf("\n");
     }
+    return best;
 }
 
 // UCI protocol
@@ -2059,20 +2192,44 @@ void parse_position(char *command){
 }
 
 // parse UCI "go" command
+static long long go_param(const char *command, const char *name, long long fallback) {
+  const char *found = strstr(command, name);
+  if (!found) return fallback;
+  return atoll(found + strlen(name));
+}
+
 void parse_go(char *command){
-  int depth = -1;
+  int depth = (int)go_param(command, " depth ", MAX_PLY - 1);
+  long long movetime = go_param(command, " movetime ", -1);
+  long long time_left = go_param(command, side_to_move == white ? " wtime " : " btime ", -1);
+  long long increment = go_param(command, side_to_move == white ? " winc " : " binc ", 0);
+  long long movestogo = go_param(command, " movestogo ", 30);
+  node_limit = (U64)go_param(command, " nodes ", 0);
 
-  char *current_depth = NULL;
+  const long long overhead = 20;
+  start_time = now_ms();
+  time_set = false;
 
-  if((current_depth = strstr(command, "depth"))){
-    // convert string to int and assign result value to depth
-    depth = atoi(current_depth + 6);
+  if (movetime > 0) {
+    time_set = true;
+    long long budget = movetime > overhead * 2 ? movetime - overhead : movetime / 2;
+    soft_stop_time = hard_stop_time = start_time + budget;
+  }
+  else if (time_left >= 0) {
+    time_set = true;
+    if (movestogo <= 0) movestogo = 30;
+    long long soft = time_left / movestogo + increment * 3 / 4;
+    long long hard = soft * 3;
+    long long cap = time_left - overhead > 1 ? (time_left - overhead) / 2 : 1;
+    if (hard > cap) hard = cap;
+    if (soft > hard) soft = hard;
+    soft_stop_time = start_time + soft;
+    hard_stop_time = start_time + hard;
   }
 
-  else{
-    // default depth 6
-    depth = 6;
-  }
+  // a bare "go" (no depth, time or node limit) can't be stopped yet, so cap it
+  if (!time_set && !node_limit && !strstr(command, " depth ")) depth = 8;
+
   search_position(depth);
 }
 
@@ -2117,6 +2274,15 @@ void uci_loop(){
     // parse UCI "ucinewgame" command
     else if(strncmp(input, "ucinewgame", 10) == 0){
       parse_position("position startpos");
+      clear_tt();
+    }
+
+    // parse UCI "setoption name Hash value <MB>"
+    else if(strncmp(input, "setoption name Hash value ", 26) == 0){
+      int megabytes = atoi(input + 26);
+      if (megabytes < 1) megabytes = 1;
+      if (megabytes > 4096) megabytes = 4096;
+      init_tt(megabytes);
     }
 
     // parse UCI "go" command
@@ -2134,6 +2300,7 @@ void uci_loop(){
     else if(strncmp(input, "uci", 3) == 0){
       printf("id name Chess_Engine_Cpp\n");
       printf("id author Henry Li\n");
+      printf("option name Hash type spin default 64 min 1 max 4096\n");
       printf("uciok\n");
     }
 
@@ -2151,6 +2318,7 @@ void uci_loop(){
 
 int main(int argc, char **argv) {
   init_all();
+  init_tt(64);
 
   // "engine perft <depth> [fen]": print the perft node count and exit
   if (argc >= 3 && strcmp(argv[1], "perft") == 0) {
