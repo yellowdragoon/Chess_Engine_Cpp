@@ -1799,7 +1799,7 @@ static inline bool is_repetition() {
 
 static inline int quiescence(int alpha, int beta)
 {
-    if ((nodes & 2047) == 0) check_time();
+    if ((nodes & 1023) == 0) check_time();
     if (stopped) return 0;
 
     nodes++;
@@ -1883,7 +1883,7 @@ static inline int negamax(int alpha, int beta, int depth)
 
     if (depth <= 0) return quiescence(alpha, beta);
 
-    if ((nodes & 2047) == 0) check_time();
+    if ((nodes & 1023) == 0) check_time();
     if (stopped) return 0;
 
     nodes++;
@@ -2316,6 +2316,156 @@ void uci_loop(){
   }
 }
 
+// ---------------------------------------------------------------------------
+// Training data generation
+// ---------------------------------------------------------------------------
+
+// Write the current position as FEN. Squares are indexed 8 * file + rank.
+void board_to_fen(char *out) {
+  char *c = out;
+  for (int rank = 7; rank >= 0; rank--) {
+    int empty = 0;
+    for (int file = 0; file < 8; file++) {
+      int square = 8 * file + rank;
+      int found = -1;
+      for (int piece = P; piece <= k; piece++)
+        if (get_bit(piece_bitboards[piece], square)) { found = piece; break; }
+      if (found == -1) { empty++; continue; }
+      if (empty) { *c++ = '0' + empty; empty = 0; }
+      *c++ = pieces_ascii[found];
+    }
+    if (empty) *c++ = '0' + empty;
+    if (rank) *c++ = '/';
+  }
+  *c++ = ' ';
+  *c++ = side_to_move == white ? 'w' : 'b';
+  *c++ = ' ';
+  if (!castle) *c++ = '-';
+  if (castle & w_kside) *c++ = 'K';
+  if (castle & w_qside) *c++ = 'Q';
+  if (castle & b_kside) *c++ = 'k';
+  if (castle & b_qside) *c++ = 'q';
+  *c++ = ' ';
+  if (en_passant_square == -1) *c++ = '-';
+  else c += snprintf(c, 3, "%s", index_to_square_name[en_passant_square]);
+  snprintf(c, 16, " %d 1", fifty);
+}
+
+static inline bool side_in_check() {
+  return is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[K]) :
+                                                      ls1b_index(piece_bitboards[k]),
+                                                      side_to_move ^ 1);
+}
+
+// Number of earlier occurrences of the current position since the last irreversible move
+static int repetition_count() {
+  int count = 0;
+  int stop = repetition_index - fifty;
+  if (stop < 0) stop = 0;
+  for (int i = repetition_index - 2; i >= stop; i -= 2)
+    if (repetition_table[i] == hash_key) count++;
+  return count;
+}
+
+static bool insufficient_material() {
+  U64 majors_and_pawns = piece_bitboards[P] | piece_bitboards[p] | piece_bitboards[R] |
+                         piece_bitboards[r] | piece_bitboards[Q] | piece_bitboards[q];
+  if (majors_and_pawns) return false;
+  int minors = count_bits(piece_bitboards[N] | piece_bitboards[n] | piece_bitboards[B] | piece_bitboards[b]);
+  return minors <= 1;
+}
+
+// Play one legal random move. Returns false if there is none.
+static bool play_random_move(std::mt19937_64 &rng) {
+  moves move_list[1];
+  generate_moves(move_list);
+  int legal[256], count = 0;
+  for (int i = 0; i < move_list->count; i++) {
+    copy_board();
+    if (make_move(move_list->moves[i], all_moves)) {
+      legal[count++] = move_list->moves[i];
+      take_back();
+    }
+  }
+  if (!count) return false;
+  make_move(legal[rng() % count], all_moves);
+  repetition_table[++repetition_index] = hash_key;
+  return true;
+}
+
+// Self-play games; writes "fen | score | result" lines where score is in
+// centipawns and result is 1.0 / 0.5 / 0.0, both from White's point of view.
+// Only quiet positions are kept: side to move not in check, best move not a
+// capture or promotion, and no mate score.
+void datagen(const char *path, int games, int soft_nodes, U64 seed) {
+  FILE *out = fopen(path, "a");
+  if (!out) { perror(path); return; }
+
+  std::mt19937_64 rng(seed);
+  init_tt(16);
+  time_set = false;
+
+  struct sample { char fen[100]; int score; };
+  static sample samples[1024];
+  U64 total = 0;
+  long long started = now_ms();
+
+  for (int game = 0; game < games; game++) {
+    // random opening: 8 or 9 plies so both sides get to move first
+    parse_fen(start_position_fen);
+    int random_plies = 8 + (rng() & 1);
+    bool ok = true;
+    for (int i = 0; i < random_plies && ok; i++) ok = play_random_move(rng);
+    if (!ok) { game--; continue; }
+
+    clear_tt();
+    int count = 0;
+    double result = -1;
+    int winning_plies = 0;
+
+    for (int game_ply = 0; game_ply < 400; game_ply++) {
+      if (fifty >= 100 || repetition_count() >= 2 || insufficient_material()) { result = 0.5; break; }
+
+      node_limit = soft_nodes;
+      int move = search_position(MAX_PLY - 1, false);
+      int score = last_search_score;               // side to move's view
+      int white_score = side_to_move == white ? score : -score;
+
+      if (!move) {                                  // no legal moves
+        result = side_in_check() ? (side_to_move == white ? 0.0 : 1.0) : 0.5;
+        break;
+      }
+
+      // adjudicate clearly decided games
+      if (abs(score) >= 2500) winning_plies++; else winning_plies = 0;
+      if (winning_plies >= 6) { result = white_score > 0 ? 1.0 : 0.0; break; }
+
+      bool quiet = !get_move_capture(move) && !get_move_promoted(move);
+      if (quiet && !side_in_check() && abs(score) < MATE_SCORE && count < 1024) {
+        board_to_fen(samples[count].fen);
+        samples[count].score = white_score;
+        count++;
+      }
+
+      make_move(move, all_moves);
+      if (repetition_index < 1900) repetition_table[++repetition_index] = hash_key;
+    }
+    if (result < 0) result = 0.5;                   // ply cap
+
+    for (int i = 0; i < count; i++)
+      fprintf(out, "%s | %d | %.1f\n", samples[i].fen, samples[i].score, result);
+    total += count;
+
+    if ((game + 1) % 50 == 0) {
+      fflush(out);
+      double secs = (now_ms() - started) / 1000.0;
+      fprintf(stderr, "games %d  positions %llu  %.0f pos/s\n", game + 1, total, total / secs);
+    }
+  }
+  node_limit = 0;
+  fclose(out);
+}
+
 int main(int argc, char **argv) {
   init_all();
   init_tt(64);
@@ -2328,6 +2478,12 @@ int main(int argc, char **argv) {
     nodes = 0;
     perft_driver(atoi(argv[2]));
     printf("%llu\n", nodes);
+    return 0;
+  }
+
+  // "engine datagen <file> <games> <soft nodes> <seed>": self-play training data
+  if (argc >= 6 && strcmp(argv[1], "datagen") == 0) {
+    datagen(argv[2], atoi(argv[3]), atoi(argv[4]), strtoull(argv[5], NULL, 10));
     return 0;
   }
 
