@@ -1,0 +1,11 @@
+[project]
+name = "chess-engine-tools"
+version = "0.1.0"
+description = "Match runner, data tools and NNUE trainer for Chess_Engine_Cpp"
+requires-python = ">=3.10"
+dependencies = [
+    "chess>=1.10",
+]
+
+[tool.uv]
+package = false
