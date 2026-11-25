@@ -942,6 +942,8 @@ CMakeFiles
 CMakeScripts
 Testing
 Makefile
+# ...but this repo builds with a Makefile
+!/Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
