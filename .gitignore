@@ -1054,3 +1054,4 @@ engine
 __pycache__/
 bin/
 data/
+nnue_net.h
