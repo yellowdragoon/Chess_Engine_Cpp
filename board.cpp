@@ -150,6 +150,56 @@ int castle;
 
 enum castle_flags{w_kside = 1, w_qside = 2, b_kside = 4, b_qside = 8};
 
+// Zobrist hashing: one random key per (piece, square), en passant square,
+// castling-rights combination and side to move. A position's key is the XOR
+// of the keys of everything in it.
+U64 piece_keys[12][64];
+U64 enpassant_keys[64];
+U64 castle_keys[16];
+U64 side_key;
+
+// Zobrist key of the current position
+U64 hash_key = 0ULL;
+
+// Half-move clock for the fifty-move rule
+int fifty = 0;
+
+// Keys of every position reached so far in the game and the search,
+// used to detect repetitions
+U64 repetition_table[2048];
+int repetition_index = 0;
+
+void init_random_keys() {
+  std::mt19937_64 rng(0x5EED1234ULL);
+  for (int piece = P; piece <= k; piece++)
+    for (int square = 0; square < 64; square++)
+      piece_keys[piece][square] = rng();
+  for (int square = 0; square < 64; square++)
+    enpassant_keys[square] = rng();
+  for (int i = 0; i < 16; i++)
+    castle_keys[i] = rng();
+  side_key = rng();
+}
+
+// Compute the Zobrist key of the current position from scratch
+U64 generate_hash_key() {
+  U64 key = 0ULL;
+  for (int piece = P; piece <= k; piece++) {
+    U64 bitboard = piece_bitboards[piece];
+    while (bitboard) {
+      int square = ls1b_index(bitboard);
+      key ^= piece_keys[piece][square];
+      bitboard &= bitboard - 1;
+    }
+  }
+  if (en_passant_square != -1)
+    key ^= enpassant_keys[en_passant_square];
+  key ^= castle_keys[castle];
+  if (side_to_move == black)
+    key ^= side_key;
+  return key;
+}
+
 /*
                            castling   move     in      in
                               right update     binary  decimal
@@ -280,6 +330,8 @@ void reset_board_state() {
   side_to_move = white;
   en_passant_square = -1;
   castle = 0;
+  fifty = 0;
+  hash_key = 0ULL;
 }
 
 void parse_fen(char * fen) {
@@ -361,6 +413,11 @@ void parse_fen(char * fen) {
     en_passant_square = -1;
   }
 
+  // half-move clock (optional in FEN)
+  fifty = 0;
+  while (*fen && *fen != ' ') fen++;
+  if (*fen == ' ') fifty = atoi(fen + 1);
+
   // populate white occupancy bitboard
   for (int piece = P; piece <= K; piece++)
       occupancy_bitboards[white] |= piece_bitboards[piece];
@@ -373,7 +430,10 @@ void parse_fen(char * fen) {
   occupancy_bitboards[2] |= occupancy_bitboards[white];
   occupancy_bitboards[2] |= occupancy_bitboards[black];
 
-  //printf("fen: '%s'\n", fen);
+  // compute the position key and start a fresh game history
+  hash_key = generate_hash_key();
+  repetition_index = 0;
+  repetition_table[0] = hash_key;
 }
 
 // Random number gen using Mersenne Twisters: https://en.wikipedia.org/wiki/Mersenne_Twister
@@ -1131,6 +1191,8 @@ void generate_moves(moves *move_list) {
 void init_all() {
   // Precalculated attack tables for leaping pieces
   init_leaping_pieces_tables();
+  // Zobrist keys
+  init_random_keys();
   // Precalculated attack masks for bishop/rook
   init_sliding_attack_masks();
   // init_magic_numbers();
@@ -1142,7 +1204,9 @@ void init_all() {
 // preserve board state
 #define copy_board()                                                            \
     U64 bitboards_copy[12], occupancies_copy[3];                                \
-    int side_copy, enpassant_copy, castle_copy;                                 \
+    int side_copy, enpassant_copy, castle_copy, fifty_copy;                     \
+    U64 hash_key_copy = hash_key;                                               \
+    fifty_copy = fifty;                                                         \
     memcpy(bitboards_copy, piece_bitboards, sizeof(piece_bitboards));           \
     memcpy(occupancies_copy, occupancy_bitboards, sizeof(occupancy_bitboards)); \
     side_copy = side_to_move;                                                   \
@@ -1155,7 +1219,9 @@ void init_all() {
     memcpy(occupancy_bitboards, occupancies_copy, sizeof(occupancy_bitboards)); \
     side_to_move = side_copy;                                                   \
     en_passant_square = enpassant_copy;                                         \
-    castle = castle_copy;
+    castle = castle_copy;                                                       \
+    fifty = fifty_copy;                                                         \
+    hash_key = hash_key_copy;
 
 // move types
 enum {all_moves, only_captures};
@@ -1173,6 +1239,10 @@ int make_move(int move, int move_flag) {
     int double_push = get_move_double_push(move);
     int enpassant = get_move_enpassant(move);
     int current_castle = get_move_castle(move);
+
+    // fifty-move rule: reset on pawn moves and captures
+    if (piece == P || piece == p || capture) fifty = 0;
+    else fifty++;
 
     // move piece
     remove_bit(piece_bitboards[piece], source_square);
@@ -1275,6 +1345,10 @@ int make_move(int move, int move_flag) {
 
     // Change side to move
     side_to_move ^= 1;
+
+    // Recompute the position key. (Incremental updates would be faster;
+    // from scratch keeps make_move simple and is cheap next to legality checks.)
+    hash_key = generate_hash_key();
 
     // Make sure king is not in check
     if(is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[k]) : ls1b_index(piece_bitboards[K]), side_to_move)){
@@ -1725,8 +1799,22 @@ static inline int quiescence(int alpha, int beta)
 }
 
 // negamax alpha beta search
+// Has the current position occurred before since the last irreversible move?
+static inline bool is_repetition() {
+  int stop = repetition_index - fifty;
+  if (stop < 0) stop = 0;
+  for (int i = repetition_index - 2; i >= stop; i -= 2)
+    if (repetition_table[i] == hash_key)
+      return true;
+  return false;
+}
+
 static inline int negamax(int alpha, int beta, int depth)
 {
+    // draw by repetition (twofold inside the tree) or fifty-move rule
+    if (ply && (is_repetition() || fifty >= 100))
+      return 0;
+
     // recurrsion escape condition
     if (depth == 0){
       // return evaluation
@@ -1776,12 +1864,14 @@ static inline int negamax(int alpha, int beta, int depth)
         }
 
         legal_moves++;
+        repetition_table[++repetition_index] = hash_key;
         
         // score current move
         int score = -negamax(-beta, -alpha, depth - 1);
         
         // decrement ply
         ply--;
+        repetition_index--;
 
         // take move back
         take_back();
@@ -1952,6 +2042,8 @@ void parse_position(char *command){
       }
 
       make_move(move, all_moves);
+      if (repetition_index < 1900)
+        repetition_table[++repetition_index] = hash_key;
 
       // move pointer to end of current move
       while(*current_char && *current_char != ' ') {
