@@ -2636,6 +2636,37 @@ void datagen(const char *path, int games, int soft_nodes, U64 seed) {
   fclose(out);
 }
 
+// Fixed-depth search over a few standard positions: a reproducible node
+// count (changes when search behaviour changes) and a speed measurement.
+void bench(int depth) {
+  const char *positions[] = {
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+    "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+    "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+    "r1bqkb1r/pp3ppp/2n1pn2/2pp4/3P4/2PBPN2/PP3PPP/RNBQK2R w KQkq - 0 6",
+    "8/8/1p1k4/p1p1p3/P1P1P3/1P1K4/8/8 w - - 0 1",
+  };
+  U64 total_nodes = 0;
+  time_set = false;
+  node_limit = 0;
+  long long started = now_ms();
+  for (const char *fen : positions) {
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%s", fen);
+    parse_fen(buffer);
+    clear_tt();
+    start_time = now_ms();
+    search_position(depth, false);
+    total_nodes += nodes;
+  }
+  long long elapsed = now_ms() - started;
+  printf("bench depth %d: %llu nodes, %lld ms, %llu nps\n", depth, total_nodes, elapsed,
+         elapsed ? total_nodes * 1000 / elapsed : 0ULL);
+}
+
 int main(int argc, char **argv) {
   init_all();
   init_tt(64);
@@ -2648,6 +2679,12 @@ int main(int argc, char **argv) {
     nodes = 0;
     perft_driver(atoi(argv[2]));
     printf("%llu\n", nodes);
+    return 0;
+  }
+
+  // "engine bench [depth]": node count and speed over fixed positions
+  if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
+    bench(argc >= 3 ? atoi(argv[2]) : 10);
     return 0;
   }
 

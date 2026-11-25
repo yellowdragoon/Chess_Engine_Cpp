@@ -3,9 +3,9 @@ CXXFLAGS ?= -O3 -DNDEBUG -std=c++17 -march=native
 WARNINGS  = -Wall -Wno-writable-strings -Wno-missing-braces -Wno-bitwise-op-parentheses -Wno-unused-const-variable -Wno-unused-function -Wno-vla-cxx-extension
 EXE      ?= engine
 
-# EVAL=nnue embeds the network in NET; EVAL=hce (default until a trained
-# network is committed) builds the hand-crafted evaluation only.
-EVAL     ?= hce
+# EVAL=nnue (default) embeds the network in NET; EVAL=hce builds the
+# hand-crafted evaluation only.
+EVAL     ?= nnue
 NET      ?= nets/net.bin
 
 SRCS = board.cpp

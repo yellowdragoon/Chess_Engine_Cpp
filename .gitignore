@@ -986,6 +986,7 @@ _deps
 
 # C/C++ binary extension file
 *.bin
+!/nets/*.bin
 
 ##### C
 # Prerequisites
