@@ -10,7 +10,19 @@ M1 Pro with 2 games in parallel.
 | v0  | 1.75M HCE self-play positions | 15 | 0.00729 | **+143 ± 69** (+63 =13 −24) | 100 |
 | v1  | 6.66M HCE self-play positions | 20 | 0.00717 | **+191 ± 50** (+134 =32 −34) | 200 |
 
-`nets/net.bin` is v1.
+Head-to-head between networks (validation losses aren't comparable across
+rows because each run draws its own validation set):
+
+| Match | Result | Games |
+|-------|--------|-------|
+| v2 (all 19.1M HCE positions) vs v1 | **+113 ± 38** (+174 =46 −80) | 300 |
+| v4 (19.1M HCE + 7.65M v1 self-play) vs v2 | **+132 ± 38** (+176 =57 −67) | 300 |
+
+v3 (7.65M v1 self-play positions only) vs v1 is still to be measured.
+
+`nets/net.bin` is v4. More data has been the biggest lever so far: going
+from 6.7M to 19M positions was worth about 110 Elo, and adding the v1
+self-play positions about 130 more.
 
 ## Setup
 
@@ -31,6 +43,5 @@ cd tools && uv run match.py ../bin/nnue ../bin/hce --games 200 --tc 8+0.08 --con
 
 ## Next
 
-- Bootstrap: generate data with v1 and retrain (round 2)
-- Train on all 19M HCE positions
+- Round 3: self-play data from v4 (running)
 - Larger hidden layer, SCReLU, output buckets

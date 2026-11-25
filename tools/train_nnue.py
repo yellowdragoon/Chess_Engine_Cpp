@@ -53,30 +53,35 @@ class NNUE(nn.Module):
             self.ft.weight[PAD].zero_()
 
 
-def load(path, val_fraction, seed):
-    data = np.load(path)
-    stm = data["stm"].astype(bool)
-    white = data["white"].astype(np.int64)
-    black = data["black"].astype(np.int64)
-    # side-to-move perspective first
-    stm_feats = np.where(stm[:, None], black, white)
-    nstm_feats = np.where(stm[:, None], white, black)
-    sign = np.where(stm, -1.0, 1.0).astype(np.float32)
-    score = data["score"].astype(np.float32) * sign
-    result = np.where(stm, 1.0 - data["result"], data["result"]).astype(np.float32)
+def load(paths, val_fraction, seed):
+    """Loads one or more .npz files. Features stay int16 (indices < 769) to keep
+    memory low; batches are widened to int64 when they're used."""
+    parts = {key: [] for key in ("stm_feats", "nstm_feats", "score", "result")}
+    for path in paths:
+        data = np.load(path)
+        stm = data["stm"].astype(bool)
+        white, black = data["white"], data["black"]
+        # side-to-move perspective first
+        parts["stm_feats"].append(np.where(stm[:, None], black, white))
+        parts["nstm_feats"].append(np.where(stm[:, None], white, black))
+        del white, black
+        sign = np.where(stm, -1.0, 1.0).astype(np.float32)
+        parts["score"].append(data["score"].astype(np.float32) * sign)
+        parts["result"].append(np.where(stm, 1.0 - data["result"], data["result"]).astype(np.float32))
+    arrays = [np.concatenate(parts[key]) for key in ("stm_feats", "nstm_feats", "score", "result")]
+    del parts
 
-    n = len(score)
-    order = np.random.default_rng(seed).permutation(n)
-    n_val = int(n * val_fraction)
-    tensors = [torch.from_numpy(x[order]) for x in (stm_feats, nstm_feats, score, result)]
-    val = [t[:n_val] for t in tensors]
-    train = [t[n_val:] for t in tensors]
+    n = len(arrays[2])
+    is_val = np.zeros(n, dtype=bool)
+    is_val[np.random.default_rng(seed).choice(n, int(n * val_fraction), replace=False)] = True
+    val = [torch.from_numpy(x[is_val]) for x in arrays]
+    train = [torch.from_numpy(x[~is_val]) for x in arrays]
     return train, val
 
 
 def batch_loss(model, batch, lam):
     stm_feats, nstm_feats, score, result = batch
-    pred = torch.sigmoid(model(stm_feats, nstm_feats))
+    pred = torch.sigmoid(model(stm_feats.long(), nstm_feats.long()))
     target = lam * torch.sigmoid(score / SCALE) + (1 - lam) * result
     return torch.mean((pred - target) ** 2)
 
@@ -122,7 +127,7 @@ def quantized_eval(path, hidden, white_feats, black_feats, stm):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("data", help=".npz from nnue_data.py")
+    ap.add_argument("data", nargs="+", help="one or more .npz files from nnue_data.py")
     ap.add_argument("--out", default="net.bin")
     ap.add_argument("--hidden", type=int, default=256)
     ap.add_argument("--epochs", type=int, default=20)

@@ -2403,7 +2403,8 @@ void uci_loop(){
   setbuf(stdout, NULL);
 
   // define user / GUI input buffer
-  char input[2000];
+  // long games send long "position startpos moves ..." lines (about 5 bytes a ply)
+  static char input[65536];
 
   // main loop
   while(true){
@@ -2414,7 +2415,7 @@ void uci_loop(){
     fflush(stdout);
 
     // get user / GUI input; stop on EOF
-    if(!fgets(input, 2000, stdin)){
+    if(!fgets(input, sizeof(input), stdin)){
       break;
     }
 
