@@ -1050,3 +1050,6 @@ dkms.conf
 .vscode
 engine
 *.o
+.venv/
+__pycache__/
+bin/
