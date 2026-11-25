@@ -94,11 +94,11 @@ const char pieces_ascii[] {"PNBRQKpnbrqk"};
 std::unordered_map<int, char> promoted_pieces = {
   {Q, 'q'},
   {q, 'q'},
-  {R, 'R'},
+  {R, 'r'},
   {r, 'r'},
-  {N, 'N'},
+  {N, 'n'},
   {n, 'n'},
-  {B, 'B'},
+  {B, 'b'},
   {b, 'b'}
 };
 
@@ -218,14 +218,14 @@ typedef struct {
 */
 
 #define encode_move(source, target, piece, promoted, capture, double_push, enpassant, castle) \
-    (source) |            \
-    (target << 6) |       \
-    (piece << 12) |       \
-    (promoted << 16) |    \
-    (capture << 20) |     \
-    (double_push << 21) | \
-    (enpassant << 22) |   \
-    (castle << 23)
+    ((source) |               \
+    ((target) << 6) |        \
+    ((piece) << 12) |        \
+    ((promoted) << 16) |     \
+    ((capture) << 20) |      \
+    ((double_push) << 21) |  \
+    ((enpassant) << 22) |    \
+    ((castle) << 23))
 
 #define get_move_source(move) ((move) & 0x3f)
 #define get_move_target(move) (((move) & 0xfc0) >> 6)
@@ -1294,7 +1294,7 @@ int make_move(int move, int move_flag) {
   {
     // make sure move is the capture
     if (get_move_capture(move))
-        make_move(move, all_moves);
+        return make_move(move, all_moves);
     
     // otherwise the move is not a capture
     else
@@ -1330,6 +1330,7 @@ void perft_driver(int depth){
 
 // Perft test
 void perft_test(int depth) {
+  nodes = 0;
   printf("\n     Performance test\n\n");
   
   // create move list instance
@@ -1367,7 +1368,7 @@ void perft_test(int depth) {
     take_back();
     
     // print move
-    printf("     move: %s%s%c  nodes: %ld\n", index_to_square_name[get_move_source(move_list->moves[move_count])],
+    printf("     move: %s%s%c  nodes: %llu\n", index_to_square_name[get_move_source(move_list->moves[move_count])],
                                               index_to_square_name[get_move_target(move_list->moves[move_count])],
                                               get_move_promoted(move_list->moves[move_count]) ? promoted_pieces[get_move_promoted(move_list->moves[move_count])] : ' ',
                                               old_nodes);
@@ -1376,7 +1377,7 @@ void perft_test(int depth) {
   
   // print results
   printf("\n    Depth: %d\n", depth);
-  printf("    Nodes: %ld\n", nodes);
+  printf("    Nodes: %llu\n", nodes);
   printf("Time (ms): %llu\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 }
 
@@ -1842,7 +1843,7 @@ void search_position(int depth)
     
     if (best_move)
     {
-      printf("info score cp %d depth %d nodes %ld\n", score, depth, nodes);
+      printf("info score cp %d depth %d nodes %llu\n", score, depth, nodes);
   
       // best move placeholder
       printf("bestmove ");
@@ -1963,7 +1964,6 @@ void parse_position(char *command){
       current_char++;
     }
   }
-  print_board();
 }
 
 // parse UCI "go" command
@@ -1972,7 +1972,7 @@ void parse_go(char *command){
 
   char *current_depth = NULL;
 
-  if(current_depth = strstr(command, "depth")){
+  if((current_depth = strstr(command, "depth"))){
     // convert string to int and assign result value to depth
     depth = atoi(current_depth + 6);
   }
@@ -1993,11 +1993,6 @@ void uci_loop(){
   // define user / GUI input buffer
   char input[2000];
 
-  // print engine info
-  printf("id name BBC\n");
-  printf("id name Henry Li\n");
-  printf("uciok\n");
-
   // main loop
   while(true){
     // reset user / GUI input
@@ -2006,9 +2001,9 @@ void uci_loop(){
     // make sure output reaches GUI
     fflush(stdout);
 
-    // get user / GUI input
+    // get user / GUI input; stop on EOF
     if(!fgets(input, 2000, stdin)){
-      continue;
+      break;
     }
 
     // make sure input is available
@@ -2045,46 +2040,37 @@ void uci_loop(){
 
     // parse UCI "uci" command
     else if(strncmp(input, "uci", 3) == 0){
-      printf("id author BBC\n");
-      printf("id name Henry Li\n");
+      printf("id name Chess_Engine_Cpp\n");
+      printf("id author Henry Li\n");
       printf("uciok\n");
+    }
+
+    // non-UCI debug command: print the board
+    else if(strncmp(input, "d", 1) == 0 && (input[1] == '\n' || input[1] == ' ')){
+      print_board();
+    }
+
+    // non-UCI debug command: "perft <depth>" on the current position
+    else if(strncmp(input, "perft", 5) == 0){
+      perft_test(atoi(input + 6));
     }
   }
 }
 
-int main() {
+int main(int argc, char **argv) {
   init_all();
-    // parse_fen(start_position_fen);
-    // perft_test(7);
 
-    // debug mode variable
-    int debug = 1;
-    
-    // if debugging
-    if (debug)
-    {
-      // parse fen
-      parse_fen(tricky_position_fen);
-      print_board();
-      //search_position(3);
-      
-      // create move list instance
-      moves move_list[1];
-      
-      // generate moves
-      generate_moves(move_list);
-      
-      // print move scores
-      print_move_scores(move_list);
+  // "engine perft <depth> [fen]": print the perft node count and exit
+  if (argc >= 3 && strcmp(argv[1], "perft") == 0) {
+    char fen[256];
+    snprintf(fen, sizeof(fen), "%s", argc >= 4 ? argv[3] : start_position_fen);
+    parse_fen(fen);
+    nodes = 0;
+    perft_driver(atoi(argv[2]));
+    printf("%llu\n", nodes);
+    return 0;
+  }
 
-      sort_moves(move_list);
-
-      print_move_scores(move_list);
-    }
-    
-    else{
-      uci_loop();
-    }
-
+  uci_loop();
   return 0;
 }
