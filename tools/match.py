@@ -40,8 +40,12 @@ def parse_tc(tc: str) -> tuple[float, float]:
     return float(base), float(inc or 0)
 
 
-def play_game(engines, white_idx, opening, tc, hash_mb):
-    """Returns (result from engine 0's perspective: 1, 0.5 or 0, reason)."""
+def play_game(engines, white_idx, opening, tc, hash_mb, depths=(None, None)):
+    """Returns (result from engine 0's perspective: 1, 0.5 or 0, reason).
+
+    depths[i], if set, makes engine i search to that fixed depth instead of
+    playing on the clock (for early versions without time control); it then
+    cannot lose on time."""
     base, inc = parse_tc(tc)
     board = chess.Board()
     for move in opening:
@@ -57,15 +61,19 @@ def play_game(engines, white_idx, opening, tc, hash_mb):
             break
         side_engine = white_idx if board.turn == chess.WHITE else 1 - white_idx
         w_engine, b_engine = white_idx, 1 - white_idx
-        limit = chess.engine.Limit(
-            white_clock=clocks[w_engine], black_clock=clocks[b_engine],
-            white_inc=inc, black_inc=inc)
+        if depths[side_engine]:
+            limit = chess.engine.Limit(depth=depths[side_engine])
+        else:
+            limit = chess.engine.Limit(
+                white_clock=clocks[w_engine], black_clock=clocks[b_engine],
+                white_inc=inc, black_inc=inc)
         start = time.monotonic()
         result = engines[side_engine].play(board, limit, game=game_id)
-        clocks[side_engine] -= time.monotonic() - start
-        if clocks[side_engine] < 0:
-            return (0.0 if side_engine == 0 else 1.0), "time forfeit"
-        clocks[side_engine] += inc
+        if not depths[side_engine]:
+            clocks[side_engine] -= time.monotonic() - start
+            if clocks[side_engine] < 0:
+                return (0.0 if side_engine == 0 else 1.0), "time forfeit"
+            clocks[side_engine] += inc
         if result.move is None or result.move not in board.legal_moves:
             return (0.0 if side_engine == 0 else 1.0), f"illegal move {result.move}"
         board.push(result.move)
@@ -120,6 +128,8 @@ def main():
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--hash", type=int, default=16, help="hash MB per engine")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--depth-a", type=int, help="search engine_a to this fixed depth instead of using the clock")
+    ap.add_argument("--depth-b", type=int, help="search engine_b to this fixed depth instead of using the clock")
     ap.add_argument("--plies", type=int, default=8, help="random opening length")
     ap.add_argument("--sprt", nargs=2, type=float, metavar=("ELO0", "ELO1"),
                     help="stop early once the SPRT accepts H0 or H1 (alpha = beta = 0.05)")
@@ -149,7 +159,7 @@ def main():
         if stop.is_set():
             return None
         opening, white = job
-        return play_game(get_engines(), white, opening, args.tc, args.hash)
+        return play_game(get_engines(), white, opening, args.tc, args.hash, (args.depth_a, args.depth_b))
 
     print(f"{args.engine_a} vs {args.engine_b}, tc {args.tc}, {len(jobs)} games max")
     with ThreadPoolExecutor(args.concurrency) as pool:

@@ -3,14 +3,41 @@
 Python tooling for the engine, managed with [uv](https://docs.astral.sh/uv/).
 Run everything from this directory; `uv run` creates the environment on first use.
 
+## Engine versions
+
+Every milestone of the engine is listed in [`versions.txt`](../versions.txt):
+a name, the commit to build, and what it added. Binaries are not committed
+(they are built with `-march=native` for your machine); build them instead:
+
+```sh
+make versions                    # from the repo root: builds bin/v0-original, bin/v1-uci, ...
+cd tools && uv run versions.py list
+```
+
+`versions.py` builds each commit from `git archive`, so your branch and working
+tree are never touched. The three versions from before time control
+(`v0`–`v2`) only understand `go depth`, so the GUI and the match runner search
+them to the fixed depth given in `versions.txt`. They also need small patches
+to run at all, in `tools/versions/` (each patch explains itself).
+
+`make ladder` plays each version against the previous one and writes
+[`docs/engine-history.md`](../docs/engine-history.md): how much Elo each
+technique was worth. It only plays pairs it has not measured yet.
+
+**When a PR changes the engine's strength,** add a line to `versions.txt`
+(the merge commit can be filled in after merging), then run `make ladder`.
+To give each version a git tag (`engine/<name>`), run `uv run versions.py tag`
+and push the tags with `git push origin 'refs/tags/engine/*'`.
+
 ## Play against the engine
 
 ```sh
 make play            # from the repo root: builds ./engine, then opens a board in the browser
 ```
 
-The page lets you pick the opponent from the current build (`engine`) and
-every binary in `bin/`, so saved versions like `bin/nnue-v4` or
+The page lets you pick the opponent from the current build (`engine`), the
+versions in `versions.txt` (with a description of each), and every other
+binary in `bin/`, so saved versions like `bin/nnue-v4` or
 `bin/hce-texel-B` are one click away. To save the current build as a version
 you can play later, run `make EXE=bin/<name>`. To choose the list yourself:
 

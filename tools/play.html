@@ -124,6 +124,8 @@
   .field { display: grid; gap: 6px; margin-bottom: 12px; }
   .field:last-of-type { margin-bottom: 14px; }
   .field > span { font-size: 12.5px; color: var(--muted); }
+  #engine-desc { color: var(--muted); font-size: 12px; line-height: 1.35; }
+  #engine-desc:empty { display: none; }
   select, input[type=text] {
     font: inherit; width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line);
     background: var(--panel-2); color: var(--text);
@@ -182,7 +184,8 @@
   <aside>
     <div class="section">
       <div class="eyebrow">New game</div>
-      <label class="field"><span>Opponent</span><select id="engine"></select></label>
+      <label class="field"><span>Opponent</span><select id="engine"></select>
+        <small id="engine-desc"></small></label>
       <div class="field"><span>You play</span>
         <div class="seg" id="color">
           <button data-v="w">White</button><button data-v="b">Black</button><button data-v="r">Random</button>
@@ -318,6 +321,7 @@ function renderPlayers() {
     engine: {
       color: engineColor, name: state.engine || "No engine",
       sub: state.depth ? `depth ${state.depth}` : (engineColor === "w" ? "White" : "Black"),
+      desc: ((state.versions || {})[state.engine] || {}).description,
     },
   };
   // the side at the bottom is whichever colour the board is oriented for
@@ -334,6 +338,7 @@ function renderPlayers() {
     icon.classList.remove("pc");
     el.querySelector(".avatar").appendChild(icon);
     el.querySelector(".name").textContent = s.name;
+    el.querySelector(".name").title = s.desc || "";
     el.querySelector(".sub").textContent = s.sub;
     el.querySelector(".turn").textContent = active ? (isEngine ? (thinking ? "Thinking…" : "To move") : "Your move") : "";
   }
@@ -367,6 +372,9 @@ function renderPanel() {
     for (const n of state.engines) sel.add(new Option(n, n));
   }
   sel.value = prefs.engine ?? state.engine ?? state.engines[0];
+  const v = (state.versions || {})[sel.value];
+  $("engine-desc").textContent = v
+    ? v.description + (v.depth ? ` · searches to depth ${v.depth} (no time control)` : "") : "";
   for (const b of $("color").children) b.classList.toggle("on", b.dataset.v === prefs.color);
   for (const b of $("time").children) b.classList.toggle("on", b.dataset.v === prefs.time);
 
@@ -467,7 +475,7 @@ for (const id of ["color", "time"]) {
     if (v) { prefs[id] = v; renderPanel(); }
   });
 }
-$("engine").addEventListener("change", (e) => { prefs.engine = e.target.value; });
+$("engine").addEventListener("change", (e) => { prefs.engine = e.target.value; renderPanel(); });
 
 $("new").onclick = async () => {
   if (thinking) return;

@@ -21,6 +21,8 @@ from pathlib import Path
 import chess
 import chess.engine
 
+from versions import MANIFEST, Version, load_manifest
+
 PAGE = Path(__file__).with_name("play.html")
 
 # The engine reads each UCI line into a fixed buffer, so a long game's
@@ -48,9 +50,21 @@ def find_engines(paths: list[str]) -> dict[str, Path]:
     return engines
 
 
+def order_engines(engines: dict[str, Path], version_order: list[str]) -> dict[str, Path]:
+    """The current build first, then manifest versions oldest to newest, then the rest."""
+    rank = {n: i for i, n in enumerate(version_order)}
+    def key(name):
+        if name == "engine":
+            return (0, 0, name)
+        return (1, rank[name], name) if name in rank else (2, 0, name)
+    return {n: engines[n] for n in sorted(engines, key=key)}
+
+
 class Game:
-    def __init__(self, engines: dict[str, Path], hash_mb: int):
+    def __init__(self, engines: dict[str, Path], hash_mb: int,
+                 versions: dict[str, Version] | None = None):
         self.engines = engines
+        self.versions = versions or {}
         self.hash_mb = hash_mb
         self.engine = None
         self.engine_name = None
@@ -118,7 +132,7 @@ class Game:
         try:
             result = self.engine.play(
                 self.board_for_engine(),
-                chess.engine.Limit(time=self.movetime),
+                self.limit(),
                 info=chess.engine.INFO_SCORE,
             )
         except (chess.engine.EngineError, chess.engine.EngineTerminatedError) as e:
@@ -127,6 +141,13 @@ class Game:
             return
         self.info = result.info
         self.board.push(result.move)
+
+    def limit(self) -> chess.engine.Limit:
+        """Early versions without time control search to a fixed depth."""
+        v = self.versions.get(self.engine_name)
+        if v and v.depth:
+            return chess.engine.Limit(depth=v.depth)
+        return chess.engine.Limit(time=self.movetime)
 
     def human_move(self, uci: str) -> str | None:
         if self.board.turn != self.human:
@@ -202,6 +223,8 @@ class Game:
             "error": self.error,
             "engine": self.engine_name,
             "engines": list(self.engines),
+            "versions": {n: {"description": v.description, "depth": v.depth}
+                         for n, v in self.versions.items() if n in self.engines},
             "movetime": self.movetime,
         }
 
@@ -270,8 +293,10 @@ def main():
     engines = find_engines(args.engines)
     if not engines:
         p.error(f"no engine binaries found in {' '.join(args.engines)}; run `make` first")
+    versions = {v.name: v for v in load_manifest()} if MANIFEST.exists() else {}
+    engines = order_engines(engines, list(versions))
 
-    game = Game(engines, args.hash)
+    game = Game(engines, args.hash, versions)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(game))
     url = f"http://localhost:{args.port}"
     print(f"{len(engines)} engine(s): {', '.join(engines)}")

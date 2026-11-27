@@ -1,0 +1,17 @@
+Minimal fixes so v1-uci (dbd9e12) can be played and tested.
+Applied by tools/versions.py before building; the original commit is unchanged.
+
+Quiescence searched captures unordered, so alpha-beta pruned almost
+nothing in tactical positions (kiwipete: depth 2 took over 20 s). Sort
+captures by MVV-LVA there, as PR 4 later did.
+
+--- a/board.cpp
++++ b/board.cpp
+@@ -1675,6 +1675,7 @@
+     
+     // generate moves
+     generate_moves(move_list);
++    sort_moves(move_list);
+     
+     // loop over moves within a movelist
+     for (int count = 0; count < move_list->count; count++)

@@ -1,0 +1,29 @@
+Minimal fixes so v0-original (b232d9f) can be played and tested.
+Applied by tools/versions.py before building; the original commit is unchanged.
+
+main() had debug mode switched on, so the binary printed a test
+position and exited instead of speaking UCI. Switch it off.
+
+Quiescence searched captures unordered, so alpha-beta pruned almost
+nothing in tactical positions (kiwipete: depth 2 took over 20 s). Sort
+captures by MVV-LVA there, as PR 4 later did.
+
+--- a/board.cpp
++++ b/board.cpp
+@@ -1674,6 +1674,7 @@
+     
+     // generate moves
+     generate_moves(move_list);
++    sort_moves(move_list);
+     
+     // loop over moves within a movelist
+     for (int count = 0; count < move_list->count; count++)
+@@ -2058,7 +2059,7 @@
+     // perft_test(7);
+ 
+     // debug mode variable
+-    int debug = 1;
++    int debug = 0;
+     
+     // if debugging
+     if (debug)

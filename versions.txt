@@ -1,0 +1,19 @@
+# Engine versions: one line per milestone, oldest first.
+#
+#   name        the binary is built to bin/<name>; the git tag is engine/<name>
+#   commit      what to build (a commit on main)
+#   limit       "-" for engines with time control; "depth=N" for early versions
+#               that only understand `go depth`, so the GUI and match runner
+#               search them to a fixed depth instead of giving them a clock
+#   description what this version added
+#
+# `make versions` builds every version into bin/; `make ladder` plays each one
+# against the previous and writes docs/engine-history.md. Add a line here in
+# every PR that changes the engine's playing strength.
+#
+# name         commit    limit    description
+v0-original    b232d9f   depth=4  Original engine: bitboards, negamax alpha-beta, quiescence, MVV-LVA capture ordering, material + piece-square tables
+v1-uci         dbd9e12   depth=4  Makefile, perft tests, UCI mode, capture-generation bug fix
+v2-zobrist     283e152   depth=4  Zobrist hashing, repetition and fifty-move draw detection
+v3-search      83fdf50   -        Iterative deepening, time control, transposition table, PVS, null move, LMR, killer and history ordering
+v4-texel       5452c4b   -        Texel-tuned tapered eval (separate middlegame and endgame tables)
