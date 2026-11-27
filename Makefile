@@ -20,6 +20,7 @@ else
 endif
 
 $(EXE): $(SRCS) $(HDRS) $(NET_HDR)
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(WARNINGS) $(DEFINES) $(SRCS) -o $@
 
 # The network as a C array, regenerated whenever NET changes
