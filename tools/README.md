@@ -94,6 +94,27 @@ uv run match.py ../bin/new ../bin/old --sprt 0 10 --games 20000 --tc 10+0.1
 "it is no stronger". The LLR uses the trinomial normal approximation, which is
 close to what fishtest and OpenBench report for the same games.
 
+Pass UCI options to either engine with `--option-a` / `--option-b`
+(repeatable), for example `--option-b Threads=1`.
+
+## Rating against Stockfish
+
+Our matches only compare versions of this engine with each other. To place it
+on an outside scale, `rate.py` plays Stockfish at reduced strength
+(`UCI_LimitStrength` + `UCI_Elo`, calibrated against the CCRL rating list) at
+a few levels, turns each score into a rating estimate, and combines them,
+weighting each by its precision.
+
+```sh
+brew install stockfish        # or put any Stockfish binary on PATH / pass --stockfish
+uv run rate.py ../engine --levels 2400 2600 2800 --games 150 --tc 8+0.08
+```
+
+Treat the result as approximate: Stockfish calibrated `UCI_Elo` at a slower
+time control, and a weakened Stockfish loses through deliberate mistakes,
+unlike a genuinely weaker engine. Pick levels where the engine scores roughly
+20-80%; a level where one side wins every game says little and is left out.
+
 ## NNUE training
 
 ```sh
