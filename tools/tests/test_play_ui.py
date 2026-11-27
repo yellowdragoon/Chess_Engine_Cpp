@@ -454,6 +454,24 @@ def test_choose_engine_and_broken_engine(browser, engine_path, tmp_path):
         assert errors == []
 
 
+def test_version_descriptions_in_picker(browser, engine_path):
+    from versions import Version
+    vs = {"old": Version("old", "x", 2, "Plain alpha-beta"), "new": Version("new", "y", None, "Tuned eval")}
+    with serve({"old": engine_path, "new": engine_path}, vs) as (url, game):
+        ctx, page, errors = open_page(browser, url)
+        ui = UI(page)
+        expect(page.locator("#engine-desc")).to_contain_text("Plain alpha-beta")
+        expect(page.locator("#engine-desc")).to_contain_text("depth 2 (no time control)")
+        page.select_option("#engine", "new")
+        expect(page.locator("#engine-desc")).to_have_text("Tuned eval")
+        ui.new_game(engine="old")
+        ui.move_click("e2", "e4")
+        assert ui.state()["depth"] == 2
+        assert page.locator("#top .name").get_attribute("title") == "Plain alpha-beta"
+        ctx.close()
+        assert errors == []
+
+
 # ---------------------------------------------------------------- layout and assets
 
 def test_offline_falls_back_to_glyphs(browser, server):

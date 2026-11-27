@@ -29,9 +29,9 @@ def engine_path() -> Path:
 
 
 @contextmanager
-def serve(engines: dict[str, Path]):
+def serve(engines: dict[str, Path], versions=None):
     """Run play.py's server on a free port in a background thread."""
-    game = play.Game(engines, hash_mb=16)
+    game = play.Game(engines, hash_mb=16, versions=versions)
     server = play.ThreadingHTTPServer(("127.0.0.1", 0), play.make_handler(game))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
