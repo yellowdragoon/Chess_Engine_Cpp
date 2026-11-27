@@ -40,8 +40,12 @@ def parse_tc(tc: str) -> tuple[float, float]:
     return float(base), float(inc or 0)
 
 
-def play_game(engines, white_idx, opening, tc, hash_mb):
-    """Returns (result from engine 0's perspective: 1, 0.5 or 0, reason)."""
+def play_game(engines, white_idx, opening, tc, hash_mb, depths=(None, None)):
+    """Returns (result from engine 0's perspective: 1, 0.5 or 0, reason).
+
+    depths[i], if set, makes engine i search to that fixed depth instead of
+    playing on the clock (for early versions without time control); it then
+    cannot lose on time."""
     base, inc = parse_tc(tc)
     board = chess.Board()
     for move in opening:
@@ -57,15 +61,19 @@ def play_game(engines, white_idx, opening, tc, hash_mb):
             break
         side_engine = white_idx if board.turn == chess.WHITE else 1 - white_idx
         w_engine, b_engine = white_idx, 1 - white_idx
-        limit = chess.engine.Limit(
-            white_clock=clocks[w_engine], black_clock=clocks[b_engine],
-            white_inc=inc, black_inc=inc)
+        if depths[side_engine]:
+            limit = chess.engine.Limit(depth=depths[side_engine])
+        else:
+            limit = chess.engine.Limit(
+                white_clock=clocks[w_engine], black_clock=clocks[b_engine],
+                white_inc=inc, black_inc=inc)
         start = time.monotonic()
         result = engines[side_engine].play(board, limit, game=game_id)
-        clocks[side_engine] -= time.monotonic() - start
-        if clocks[side_engine] < 0:
-            return (0.0 if side_engine == 0 else 1.0), "time forfeit"
-        clocks[side_engine] += inc
+        if not depths[side_engine]:
+            clocks[side_engine] -= time.monotonic() - start
+            if clocks[side_engine] < 0:
+                return (0.0 if side_engine == 0 else 1.0), "time forfeit"
+            clocks[side_engine] += inc
         if result.move is None or result.move not in board.legal_moves:
             return (0.0 if side_engine == 0 else 1.0), f"illegal move {result.move}"
         board.push(result.move)
@@ -77,6 +85,17 @@ def play_game(engines, white_idx, opening, tc, hash_mb):
         return 0.5, outcome.termination.name.lower()
     winner_engine = white_idx if outcome.winner == chess.WHITE else 1 - white_idx
     return (1.0 if winner_engine == 0 else 0.0), outcome.termination.name.lower()
+
+
+def parse_options(pairs: list[str]) -> dict[str, str]:
+    """["UCI_Elo=1800", ...] -> {"UCI_Elo": "1800"}; python-chess converts the types."""
+    options = {}
+    for pair in pairs:
+        name, sep, value = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"bad option {pair!r}, expected NAME=VALUE")
+        options[name] = value
+    return options
 
 
 def elo_from_score(score: float) -> float:
@@ -119,7 +138,13 @@ def main():
     ap.add_argument("--tc", default="10+0.1", help="seconds+increment per game, e.g. 10+0.1")
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--hash", type=int, default=16, help="hash MB per engine")
+    ap.add_argument("--option-a", action="append", default=[], metavar="NAME=VALUE",
+                    help="UCI option for engine_a, repeatable (e.g. Threads=1)")
+    ap.add_argument("--option-b", action="append", default=[], metavar="NAME=VALUE",
+                    help="UCI option for engine_b, repeatable (e.g. UCI_LimitStrength=true --option-b UCI_Elo=1800)")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--depth-a", type=int, help="search engine_a to this fixed depth instead of using the clock")
+    ap.add_argument("--depth-b", type=int, help="search engine_b to this fixed depth instead of using the clock")
     ap.add_argument("--plies", type=int, default=8, help="random opening length")
     ap.add_argument("--sprt", nargs=2, type=float, metavar=("ELO0", "ELO1"),
                     help="stop early once the SPRT accepts H0 or H1 (alpha = beta = 0.05)")
@@ -141,6 +166,9 @@ def main():
         if not hasattr(local, "engines"):
             local.engines = [chess.engine.SimpleEngine.popen_uci(args.engine_a),
                              chess.engine.SimpleEngine.popen_uci(args.engine_b)]
+            for engine, options in zip(local.engines, (args.option_a, args.option_b)):
+                if options:
+                    engine.configure(parse_options(options))
             with lock:
                 all_engines.extend(local.engines)
         return local.engines
@@ -149,38 +177,43 @@ def main():
         if stop.is_set():
             return None
         opening, white = job
-        return play_game(get_engines(), white, opening, args.tc, args.hash)
+        return play_game(get_engines(), white, opening, args.tc, args.hash, (args.depth_a, args.depth_b))
 
     print(f"{args.engine_a} vs {args.engine_b}, tc {args.tc}, {len(jobs)} games max")
-    with ThreadPoolExecutor(args.concurrency) as pool:
-        futures = [pool.submit(run, job) for job in jobs]
-        for future in as_completed(futures):
-            res = future.result()
-            if res is None:
-                continue
-            result, reason = res
-            with lock:
-                key = {1.0: "w", 0.5: "d", 0.0: "l"}[result]
-                stats[key] += 1
-                stats["reasons"][reason] = stats["reasons"].get(reason, 0) + 1
-                w, d, l = stats["w"], stats["d"], stats["l"]
-                elo, err = summarize(w, d, l)
-                line = f"games {w + d + l:4d}  +{w} ={d} -{l}  elo {elo:+.1f} ± {err:.1f}"
-                if args.sprt:
-                    ratio = llr(w, d, l, *args.sprt)
-                    line += f"  llr {ratio:+.2f} ({lower:.2f}, {upper:.2f})"
-                    if ratio >= upper or ratio <= lower:
-                        stop.set()
-                print(line, flush=True)
-            if stop.is_set():
-                for f in futures:
-                    f.cancel()
-
-    for engine in all_engines:
-        try:
-            engine.quit()
-        except Exception:
-            pass
+    try:
+        with ThreadPoolExecutor(args.concurrency) as pool:
+            futures = [pool.submit(run, job) for job in jobs]
+            for future in as_completed(futures):
+                # Once the SPRT has stopped, ignore queued (cancelled) games and the
+                # games that were still running, so the verdict matches the counts.
+                if future.cancelled() or stop.is_set():
+                    continue
+                res = future.result()
+                if res is None:
+                    continue
+                result, reason = res
+                with lock:
+                    key = {1.0: "w", 0.5: "d", 0.0: "l"}[result]
+                    stats[key] += 1
+                    stats["reasons"][reason] = stats["reasons"].get(reason, 0) + 1
+                    w, d, l = stats["w"], stats["d"], stats["l"]
+                    elo, err = summarize(w, d, l)
+                    line = f"games {w + d + l:4d}  +{w} ={d} -{l}  elo {elo:+.1f} ± {err:.1f}"
+                    if args.sprt:
+                        ratio = llr(w, d, l, *args.sprt)
+                        line += f"  llr {ratio:+.2f} ({lower:.2f}, {upper:.2f})"
+                        if ratio >= upper or ratio <= lower:
+                            stop.set()
+                    print(line, flush=True)
+                if stop.is_set():
+                    for f in futures:
+                        f.cancel()
+    finally:  # never leave engine processes running, even after an error
+        for engine in all_engines:
+            try:
+                engine.quit()
+            except Exception:
+                pass
 
     w, d, l = stats["w"], stats["d"], stats["l"]
     elo, err = summarize(w, d, l)
