@@ -17,3 +17,6 @@ v1-uci         dbd9e12   depth=4  Makefile, perft tests, UCI mode, capture-gener
 v2-zobrist     283e152   depth=4  Zobrist hashing, repetition and fifty-move draw detection
 v3-search      83fdf50   -        Iterative deepening, time control, transposition table, PVS, null move, LMR, killer and history ordering
 v4-texel       5452c4b   -        Texel-tuned tapered eval (separate middlegame and endgame tables)
+v5-nnue        7fa126c   -        NNUE evaluation (768 -> 256x2 -> 1, incremental accumulators), first trained net
+v6-nnue-v4     a9f4098   -        Net v4: more data plus games from the first net (bootstrapping)
+v7-fast-search 32c527d   -        Incremental Zobrist keys, cheaper quiescence, bounded history
