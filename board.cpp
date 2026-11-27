@@ -334,6 +334,9 @@ void reset_board_state() {
   hash_key = 0ULL;
 }
 
+void nnue_refresh();
+void init_nnue();
+
 void parse_fen(char * fen) {
   reset_board_state();
   // loop over board squares
@@ -434,6 +437,7 @@ void parse_fen(char * fen) {
   hash_key = generate_hash_key();
   repetition_index = 0;
   repetition_table[0] = hash_key;
+  nnue_refresh();
 }
 
 // Random number gen using Mersenne Twisters: https://en.wikipedia.org/wiki/Mersenne_Twister
@@ -1193,6 +1197,8 @@ void init_all() {
   init_leaping_pieces_tables();
   // Zobrist keys
   init_random_keys();
+  // network weights (no-op in the hand-crafted build)
+  init_nnue();
   // Precalculated attack masks for bishop/rook
   init_sliding_attack_masks();
   // init_magic_numbers();
@@ -1201,10 +1207,156 @@ void init_all() {
   init_sliding_pieces_tables(rook);
 }
 
+// ---------------------------------------------------------------------------
+// NNUE evaluation
+//
+// 768 piece-square inputs per perspective -> NNUE_HIDDEN accumulator per side
+// -> [side to move, other side] -> clipped ReLU -> 1 output. Weights come from
+// tools/train_nnue.py and are embedded at build time (see Makefile).
+//
+// Accumulators live on a stack indexed by acc_top. make_move pushes a new one,
+// updated incrementally from the bitboards that changed; take_back restores
+// acc_top, which pops it for free.
+// ---------------------------------------------------------------------------
+
+#ifndef USE_NNUE
+#define USE_NNUE 0
+#endif
+
+#define NNUE_INPUTS 768
+#define NNUE_HIDDEN 256
+#define NNUE_QA 255
+#define NNUE_QB 512
+#define NNUE_SCALE 400
+#define ACC_STACK 512
+
+typedef struct {
+  alignas(64) int16_t values[2][NNUE_HIDDEN];   // [white perspective][black perspective]
+} accumulator;
+
+accumulator acc_stack[ACC_STACK];
+int acc_top = 0;
+
+#if USE_NNUE
+#include "nnue_net.h"
+
+alignas(64) int16_t nnue_ft_weights[NNUE_INPUTS][NNUE_HIDDEN];
+alignas(64) int16_t nnue_ft_bias[NNUE_HIDDEN];
+alignas(64) int16_t nnue_out_weights[2 * NNUE_HIDDEN];
+int32_t nnue_out_bias;
+
+void init_nnue() {
+  const size_t expected = sizeof(nnue_ft_weights) + sizeof(nnue_ft_bias) +
+                          sizeof(nnue_out_weights) + sizeof(nnue_out_bias);
+  if (sizeof(nnue_net_data) != expected) {
+    fprintf(stderr, "embedded network has %zu bytes, expected %zu\n", sizeof(nnue_net_data), expected);
+    exit(1);
+  }
+  const unsigned char *data = nnue_net_data;
+  memcpy(nnue_ft_weights, data, sizeof(nnue_ft_weights)); data += sizeof(nnue_ft_weights);
+  memcpy(nnue_ft_bias, data, sizeof(nnue_ft_bias)); data += sizeof(nnue_ft_bias);
+  memcpy(nnue_out_weights, data, sizeof(nnue_out_weights)); data += sizeof(nnue_out_weights);
+  memcpy(&nnue_out_bias, data, sizeof(nnue_out_bias));
+}
+
+// Feature index of a piece on an engine square (8 * file + rank) for a perspective
+static inline int nnue_feature(int perspective, int piece, int square) {
+  int standard = ((square & 7) << 3) | (square >> 3);   // to a1=0, b1=1, ... h8=63
+  int color = piece >= p ? black : white;
+  int type = piece % 6;
+  if (perspective == black) standard ^= 56;
+  return (color == perspective ? 0 : 384) + type * 64 + standard;
+}
+
+static inline void nnue_add(accumulator *acc, int piece, int square) {
+  const int16_t *w = nnue_ft_weights[nnue_feature(white, piece, square)];
+  const int16_t *b = nnue_ft_weights[nnue_feature(black, piece, square)];
+  for (int i = 0; i < NNUE_HIDDEN; i++) acc->values[white][i] += w[i];
+  for (int i = 0; i < NNUE_HIDDEN; i++) acc->values[black][i] += b[i];
+}
+
+static inline void nnue_sub(accumulator *acc, int piece, int square) {
+  const int16_t *w = nnue_ft_weights[nnue_feature(white, piece, square)];
+  const int16_t *b = nnue_ft_weights[nnue_feature(black, piece, square)];
+  for (int i = 0; i < NNUE_HIDDEN; i++) acc->values[white][i] -= w[i];
+  for (int i = 0; i < NNUE_HIDDEN; i++) acc->values[black][i] -= b[i];
+}
+
+// Build the accumulator for the current position from scratch, at the bottom of the stack
+void nnue_refresh() {
+  acc_top = 0;
+  accumulator *acc = &acc_stack[0];
+  memcpy(acc->values[white], nnue_ft_bias, sizeof(nnue_ft_bias));
+  memcpy(acc->values[black], nnue_ft_bias, sizeof(nnue_ft_bias));
+  for (int piece = P; piece <= k; piece++) {
+    U64 bitboard = piece_bitboards[piece];
+    while (bitboard) {
+      nnue_add(acc, piece, ls1b_index(bitboard));
+      bitboard &= bitboard - 1;
+    }
+  }
+}
+
+// Push an accumulator for the position after a move, given the bitboards before it
+static inline void nnue_push(const U64 *old_bitboards) {
+  if (acc_top + 1 >= ACC_STACK) { nnue_refresh(); return; }
+  accumulator *acc = &acc_stack[acc_top + 1];
+  *acc = acc_stack[acc_top];
+  acc_top++;
+  for (int piece = P; piece <= k; piece++) {
+    U64 changed = old_bitboards[piece] ^ piece_bitboards[piece];
+    while (changed) {
+      int square = ls1b_index(changed);
+      if (get_bit(piece_bitboards[piece], square)) nnue_add(acc, piece, square);
+      else nnue_sub(acc, piece, square);
+      changed &= changed - 1;
+    }
+  }
+}
+
+static inline int clamp_activation(int x) {
+  return x < 0 ? 0 : (x > NNUE_QA ? NNUE_QA : x);
+}
+
+// Static evaluation from the side to move's point of view, in centipawns
+static inline int nnue_evaluate() {
+#ifdef NNUE_CHECK
+  // debug builds: the incrementally updated accumulator must match a full rebuild
+  {
+    accumulator fresh;
+    memcpy(fresh.values[white], nnue_ft_bias, sizeof(nnue_ft_bias));
+    memcpy(fresh.values[black], nnue_ft_bias, sizeof(nnue_ft_bias));
+    for (int piece = P; piece <= k; piece++)
+      for (U64 bb = piece_bitboards[piece]; bb; bb &= bb - 1)
+        nnue_add(&fresh, piece, ls1b_index(bb));
+    if (memcmp(&fresh, &acc_stack[acc_top], sizeof(fresh)) != 0) {
+      fprintf(stderr, "NNUE accumulator mismatch at acc_top %d\n", acc_top);
+      abort();
+    }
+  }
+#endif
+  const accumulator *acc = &acc_stack[acc_top];
+  const int16_t *us = acc->values[side_to_move];
+  const int16_t *them = acc->values[side_to_move ^ 1];
+  int32_t sum = 0;
+  for (int i = 0; i < NNUE_HIDDEN; i++)
+    sum += clamp_activation(us[i]) * nnue_out_weights[i];
+  for (int i = 0; i < NNUE_HIDDEN; i++)
+    sum += clamp_activation(them[i]) * nnue_out_weights[NNUE_HIDDEN + i];
+  return (int)(((int64_t)sum + nnue_out_bias) * NNUE_SCALE / (NNUE_QA * NNUE_QB));
+}
+
+#else
+void init_nnue() {}
+void nnue_refresh() {}
+static inline void nnue_push(const U64 *) {}
+#endif
+
 // preserve board state
 #define copy_board()                                                            \
     U64 bitboards_copy[12], occupancies_copy[3];                                \
     int side_copy, enpassant_copy, castle_copy, fifty_copy;                     \
+    int acc_top_copy = acc_top;                                                 \
     U64 hash_key_copy = hash_key;                                               \
     fifty_copy = fifty;                                                         \
     memcpy(bitboards_copy, piece_bitboards, sizeof(piece_bitboards));           \
@@ -1221,7 +1373,8 @@ void init_all() {
     en_passant_square = enpassant_copy;                                         \
     castle = castle_copy;                                                       \
     fifty = fifty_copy;                                                         \
-    hash_key = hash_key_copy;
+    hash_key = hash_key_copy;                                                   \
+    acc_top = acc_top_copy;
 
 // move types
 enum {all_moves, only_captures};
@@ -1359,6 +1512,7 @@ int make_move(int move, int move_flag) {
 
     else{
       // legal move
+      nnue_push(bitboards_copy);
       return 1;
     }
   }
@@ -1477,10 +1631,10 @@ static int game_phase()
     return phase > 24 ? 24 : phase;
 }
 
-// Static evaluation from the side to move's point of view. A white piece on
-// square sq scores weight[piece][sq]; a black piece scores minus the weight of
-// the mirrored square (sq ^ 7 flips the rank in file-major order).
-int evaluate()
+// Hand-crafted static evaluation from the side to move's point of view. A white
+// piece on square sq scores weight[piece][sq]; a black piece scores minus the
+// weight of the mirrored square (sq ^ 7 flips the rank in file-major order).
+int evaluate_hce()
 {
     int mg = 0, eg = 0;
     for (int piece = P; piece <= K; piece++)
@@ -1505,6 +1659,14 @@ int evaluate()
     int phase = game_phase();
     int score = (mg * phase + eg * (24 - phase)) / 24;
     return (side_to_move == white) ? score : -score;
+}
+
+static inline int evaluate() {
+#if USE_NNUE
+  return nnue_evaluate();
+#else
+  return evaluate_hce();
+#endif
 }
 
 // most valuable victim & less valuable attacker
@@ -2089,6 +2251,7 @@ void parse_position(char *command){
       make_move(move, all_moves);
       if (repetition_index < 1900)
         repetition_table[++repetition_index] = hash_key;
+      nnue_refresh();
 
       // move pointer to end of current move
       while(*current_char && *current_char != ' ') {
@@ -2216,6 +2379,11 @@ void uci_loop(){
       printf("uciok\n");
     }
 
+    // non-UCI debug command: static evaluation, side to move's view
+    else if(strncmp(input, "eval", 4) == 0){
+      printf("%d\n", evaluate());
+    }
+
     // non-UCI debug command: print the board
     else if(strncmp(input, "d", 1) == 0 && (input[1] == '\n' || input[1] == ' ')){
       print_board();
@@ -2305,6 +2473,7 @@ static bool play_random_move(std::mt19937_64 &rng) {
   if (!count) return false;
   make_move(legal[rng() % count], all_moves);
   repetition_table[++repetition_index] = hash_key;
+  nnue_refresh();
   return true;
 }
 
@@ -2364,6 +2533,7 @@ void datagen(const char *path, int games, int soft_nodes, U64 seed) {
 
       make_move(move, all_moves);
       if (repetition_index < 1900) repetition_table[++repetition_index] = hash_key;
+      nnue_refresh();
     }
     if (result < 0) result = 0.5;                   // ply cap
 
@@ -2381,6 +2551,37 @@ void datagen(const char *path, int games, int soft_nodes, U64 seed) {
   fclose(out);
 }
 
+// Fixed-depth search over a few standard positions: a reproducible node
+// count (changes when search behaviour changes) and a speed measurement.
+void bench(int depth) {
+  const char *positions[] = {
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+    "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+    "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+    "r1bqkb1r/pp3ppp/2n1pn2/2pp4/3P4/2PBPN2/PP3PPP/RNBQK2R w KQkq - 0 6",
+    "8/8/1p1k4/p1p1p3/P1P1P3/1P1K4/8/8 w - - 0 1",
+  };
+  U64 total_nodes = 0;
+  time_set = false;
+  node_limit = 0;
+  long long started = now_ms();
+  for (const char *fen : positions) {
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%s", fen);
+    parse_fen(buffer);
+    clear_tt();
+    start_time = now_ms();
+    search_position(depth, false);
+    total_nodes += nodes;
+  }
+  long long elapsed = now_ms() - started;
+  printf("bench depth %d: %llu nodes, %lld ms, %llu nps\n", depth, total_nodes, elapsed,
+         elapsed ? total_nodes * 1000 / elapsed : 0ULL);
+}
+
 int main(int argc, char **argv) {
   init_all();
   init_tt(64);
@@ -2393,6 +2594,12 @@ int main(int argc, char **argv) {
     nodes = 0;
     perft_driver(atoi(argv[2]));
     printf("%llu\n", nodes);
+    return 0;
+  }
+
+  // "engine bench [depth]": node count and speed over fixed positions
+  if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
+    bench(argc >= 3 ? atoi(argv[2]) : 10);
     return 0;
   }
 

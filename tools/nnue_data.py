@@ -59,14 +59,17 @@ def convert(paths, out_prefix):
     kept = 0
     for line in lines:
         parts = line.split("|")
-        if len(parts) != 3:
+        try:
+            # a file still being written can end in a partial line
+            w, b, side = fen_features(parts[0].strip())
+            line_score, line_result = int(parts[1]), float(parts[2])
+        except (IndexError, KeyError, ValueError):
             continue
-        w, b, side = fen_features(parts[0].strip())
         white[kept, : len(w)] = w
         black[kept, : len(b)] = b
         stm[kept] = side
-        score[kept] = int(parts[1])
-        result[kept] = float(parts[2])
+        score[kept] = line_score
+        result[kept] = line_result
         kept += 1
     np.savez(out_prefix, white=white[:kept], black=black[:kept], stm=stm[:kept],
              score=score[:kept], result=result[:kept])

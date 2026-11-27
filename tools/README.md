@@ -131,7 +131,8 @@ uv run texel.py ../data/hce/*.txt --cache ../data/texel.npz --out ../hce_params.
 uv run texel.py ../data/hce/*.txt --cache ../data/texel.npz --tapered --out ../hce_params.h
 
 # confirm the engine's eval matches the tuner's integer eval
-cd .. && make && cd tools && uv run texel.py ../data/hce/1001.txt --check ../engine
+# (EVAL=hce: the default build's `eval` command prints the NNUE score)
+cd .. && make EVAL=hce EXE=bin/hce && cd tools && uv run texel.py ../data/hce/1001.txt --check ../bin/hce
 ```
 
 It starts from the weights already in `hce_params.h`, fits K once, holds out

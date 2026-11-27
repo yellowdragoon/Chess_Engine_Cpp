@@ -986,6 +986,7 @@ _deps
 
 # C/C++ binary extension file
 *.bin
+!/nets/*.bin
 
 ##### C
 # Prerequisites
@@ -1054,3 +1055,4 @@ engine
 __pycache__/
 bin/
 data/
+nnue_net.h

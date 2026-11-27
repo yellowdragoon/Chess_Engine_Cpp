@@ -115,7 +115,9 @@ def quantized_eval(path, hidden, white_feats, black_feats, stm):
     us, them = (acc_w, acc_b) if stm == 0 else (acc_b, acc_w)
     hidden_act = np.clip(np.concatenate([us, them]), 0, QA)
     out = int((hidden_act * out_w).sum()) + out_b
-    return out * int(SCALE) // (QA * QB)
+    # integer division truncating toward zero, like C++
+    q = out * int(SCALE)
+    return q // (QA * QB) if q >= 0 else -((-q) // (QA * QB))
 
 
 def main():
