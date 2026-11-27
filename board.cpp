@@ -1499,10 +1499,6 @@ int make_move(int move, int move_flag) {
     // Change side to move
     side_to_move ^= 1;
 
-    // Recompute the position key. (Incremental updates would be faster;
-    // from scratch keeps make_move simple and is cheap next to legality checks.)
-    hash_key = generate_hash_key();
-
     // Make sure king is not in check
     if(is_square_attacked((side_to_move == white) ? ls1b_index(piece_bitboards[k]) : ls1b_index(piece_bitboards[K]), side_to_move)){
       take_back();
@@ -1511,7 +1507,19 @@ int make_move(int move, int move_flag) {
     }
 
     else{
-      // legal move
+      // legal move: update the position key from what changed, the same
+      // way the NNUE accumulator is updated
+      U64 key = hash_key ^ side_key ^ castle_keys[castle_copy] ^ castle_keys[castle];
+      if (enpassant_copy != -1) key ^= enpassant_keys[enpassant_copy];
+      if (en_passant_square != -1) key ^= enpassant_keys[en_passant_square];
+      for (int changed_piece = P; changed_piece <= k; changed_piece++)
+        for (U64 changed = bitboards_copy[changed_piece] ^ piece_bitboards[changed_piece]; changed; changed &= changed - 1)
+          key ^= piece_keys[changed_piece][ls1b_index(changed)];
+      hash_key = key;
+#ifdef HASH_CHECK
+      if (hash_key != generate_hash_key()) { fprintf(stderr, "hash mismatch\n"); abort(); }
+#endif
+
       nnue_push(bitboards_copy);
       return 1;
     }
@@ -1811,7 +1819,7 @@ static inline void store_tt(int score, int depth, int flag, int move) {
 // Order: TT move, captures (MVV-LVA), killers, then history
 static inline int score_move(int move, int tt_move)
 {
-    if (move == tt_move) return 30000;
+    if (move == tt_move) return 2000000;
 
     // score capture move
     if (get_move_capture(move))
@@ -1835,12 +1843,12 @@ static inline int score_move(int move, int tt_move)
         }
 
         // score move by MVV LVA lookup [source piece][target piece]
-        return mvv_lva[get_move_piece(move)][target_piece] + 10000;
+        return mvv_lva[get_move_piece(move)][target_piece] + 1000000;
     }
 
     // score quiet move
-    if (killer_moves[0][ply] == move) return 9000;
-    if (killer_moves[1][ply] == move) return 8000;
+    if (killer_moves[0][ply] == move) return 900000;
+    if (killer_moves[1][ply] == move) return 800000;
     return history_moves[get_move_piece(move)][get_move_target(move)];
 }
 
@@ -1895,6 +1903,9 @@ static inline int quiescence(int alpha, int beta)
     for (int count = 0; count < move_list->count; count++)
     {
         pick_move(move_list, scores, count);
+
+        // captures are ordered first, so the rest are quiet moves
+        if (!get_move_capture(move_list->moves[count])) break;
 
         copy_board();
         ply++;
@@ -1969,9 +1980,13 @@ static inline int negamax(int alpha, int beta, int depth)
         ply++;
         repetition_table[++repetition_index] = hash_key;
 
+        if (en_passant_square != -1) hash_key ^= enpassant_keys[en_passant_square];
         en_passant_square = -1;
         side_to_move ^= 1;
-        hash_key = generate_hash_key();
+        hash_key ^= side_key;
+#ifdef HASH_CHECK
+        if (hash_key != generate_hash_key()) { fprintf(stderr, "null move hash mismatch\n"); abort(); }
+#endif
 
         int score = -negamax(-beta, -beta + 1, depth - 1 - 2);
 
@@ -2050,7 +2065,12 @@ static inline int negamax(int alpha, int beta, int depth)
             hash_flag = hash_exact;
 
             if (quiet)
-                history_moves[get_move_piece(move)][get_move_target(move)] += depth * depth;
+            {
+                // keep history below the killer and capture bonuses
+                int *entry = &history_moves[get_move_piece(move)][get_move_target(move)];
+                *entry += depth * depth;
+                if (*entry > 500000) *entry = 500000;
+            }
 
             // update the principal variation
             pv_table[ply][ply] = move;
@@ -2315,7 +2335,8 @@ void uci_loop(){
   setbuf(stdout, NULL);
 
   // define user / GUI input buffer
-  char input[2000];
+  // long games send long "position startpos moves ..." lines (about 5 bytes a ply)
+  static char input[65536];
 
   // main loop
   while(true){
@@ -2326,7 +2347,7 @@ void uci_loop(){
     fflush(stdout);
 
     // get user / GUI input; stop on EOF
-    if(!fgets(input, 2000, stdin)){
+    if(!fgets(input, sizeof(input), stdin)){
       break;
     }
 

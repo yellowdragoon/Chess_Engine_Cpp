@@ -68,7 +68,10 @@ def play_game(engines, white_idx, opening, tc, hash_mb, depths=(None, None)):
                 white_clock=clocks[w_engine], black_clock=clocks[b_engine],
                 white_inc=inc, black_inc=inc)
         start = time.monotonic()
-        result = engines[side_engine].play(board, limit, game=game_id)
+        try:
+            result = engines[side_engine].play(board, limit, game=game_id)
+        except chess.engine.EngineError as error:
+            return (0.0 if side_engine == 0 else 1.0), f"engine error: {error}"[:60]
         if not depths[side_engine]:
             clocks[side_engine] -= time.monotonic() - start
             if clocks[side_engine] < 0:
