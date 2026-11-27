@@ -3,6 +3,49 @@
 Python tooling for the engine, managed with [uv](https://docs.astral.sh/uv/).
 Run everything from this directory; `uv run` creates the environment on first use.
 
+## Play against the engine
+
+```sh
+make play            # from the repo root: builds ./engine, then opens a board in the browser
+```
+
+The page lets you pick the opponent from the current build (`engine`) and
+every binary in `bin/`, so saved versions like `bin/nnue-v4` or
+`bin/hce-texel-B` are one click away. To save the current build as a version
+you can play later, run `make EXE=bin/<name>`. To choose the list yourself:
+
+```sh
+cd tools
+uv run play.py ../bin/nnue-v4 ../bin/hce-texel-B   # just these
+uv run play.py ../bin --port 8001                  # every engine in a folder
+```
+
+Drag a piece or click it, then click a square. You can choose your colour and
+the engine's time per move, take back, and flip the board. The eval bar and the
+engine's line show its last score (White's view) and depth. To start from a
+position, paste a FEN into the new-game panel. Piece art is
+Colin M.L. Burnett's set (GPLv2+), loaded from lichess's repository at a pinned
+commit; offline, the page falls back to Unicode pieces.
+
+### Tests
+
+```sh
+make test-play     # from the repo root
+```
+
+Three layers, all against the real engine binary:
+
+- `tests/test_engine_uci.py`: the engine applies castling, en passant and
+  every promotion exactly as python-chess does (compares its `d` output after
+  special moves and along seeded random games).
+- `tests/test_play_server.py`: `play.py`'s rules, takeback, game endings,
+  FEN starts, long games, switching engines, broken or crashing engines, and
+  the HTTP API.
+- `tests/test_play_ui.py`: headless Chromium with real mouse clicks and drags:
+  moving, castling, en passant, promotion picker, playing Black, flip,
+  takeback, results, engine choice, phone layout and the offline fallback.
+  Piece images are stubbed, so the tests need no network.
+
 ## Match runner
 
 Plays two UCI engines against each other. Each random 8-ply opening is played
