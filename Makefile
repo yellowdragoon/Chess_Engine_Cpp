@@ -9,11 +9,15 @@ HDRS = board.h magic.h hce_params.h
 $(EXE): $(SRCS) $(HDRS)
 	$(CXX) $(CXXFLAGS) $(WARNINGS) $(SRCS) -o $@
 
-.PHONY: test clean
+.PHONY: test clean play
 
 # Perft regression: node counts for standard test positions
 test: $(EXE)
 	./tests/perft.sh ./$(EXE)
+
+# Play against the engine in the browser
+play: $(EXE)
+	cd tools && uv run play.py ../$(EXE)
 
 clean:
 	rm -f $(EXE)

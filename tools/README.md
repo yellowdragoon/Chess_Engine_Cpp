@@ -3,6 +3,17 @@
 Python tooling for the engine, managed with [uv](https://docs.astral.sh/uv/).
 Run everything from this directory; `uv run` creates the environment on first use.
 
+## Play against the engine
+
+```sh
+make play                      # from the repo root: builds the engine and opens a board in the browser
+cd tools && uv run play.py ../bin/some-version --port 8001   # any UCI engine
+```
+
+Click a piece, then a highlighted square. You can pick your colour and the
+engine's time per move, take back, and flip the board. The panel shows the
+engine's eval (from White's point of view) and the depth it reached.
+
 ## Match runner
 
 Plays two UCI engines against each other. Each random 8-ply opening is played

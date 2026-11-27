@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play the engine</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --panel: #fffdf8; --text: #22201c; --muted: #6f6a60; --line: #ddd6c8;
+    --light: #eeddb8; --dark: #b2875c; --sel: #f2c94c; --last: rgba(242, 201, 76, .45);
+    --check: #e0574a; --dot: rgba(30, 30, 30, .28); --accent: #2f6f4e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --panel: #24221f; --text: #ece7dd; --muted: #a39c8f; --line: #3a3732;
+      --light: #c9b38f; --dark: #8a6646; --dot: rgba(20, 20, 20, .38); --accent: #6cbf91;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main {
+    display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; align-items: flex-start;
+    padding: 24px 16px;
+  }
+  #board {
+    width: min(88vw, 560px); aspect-ratio: 1; display: grid;
+    grid-template-columns: repeat(8, 1fr); border-radius: 6px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .18); user-select: none;
+  }
+  .sq { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .sq.l { background: var(--light); } .sq.d { background: var(--dark); }
+  .sq.last::before, .sq.sel::before, .sq.check::before { content: ""; position: absolute; inset: 0; }
+  .sq.last::before { background: var(--last); }
+  .sq.sel::before { background: var(--sel); opacity: .7; }
+  .sq.check::before { background: radial-gradient(circle, var(--check) 0%, transparent 72%); }
+  .sq.target::after {
+    content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: var(--dot);
+  }
+  .sq.target.occ::after {
+    width: 100%; height: 100%; background: none; border-radius: 0;
+    box-shadow: inset 0 0 0 5px var(--dot);
+  }
+  .pc { position: relative; z-index: 1; font-size: min(9.6vw, 60px); line-height: 1; }
+  .pc.w { color: #fff; text-shadow: 0 0 2px #000, 0 0 1px #000, 0 1px 2px rgba(0,0,0,.5); }
+  .pc.b { color: #111; text-shadow: 0 0 1px #fff8; }
+  .coord { position: absolute; font-size: 11px; font-weight: 600; opacity: .7; z-index: 1; }
+  .coord.f { right: 3px; bottom: 1px; } .coord.r { left: 3px; top: 1px; }
+  .sq.l .coord { color: var(--dark); } .sq.d .coord { color: var(--light); }
+
+  aside {
+    width: min(88vw, 300px); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 14px;
+  }
+  h1 { font-size: 17px; margin: 0; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  label { color: var(--muted); font-size: 13px; }
+  select, button {
+    font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text);
+  }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #status { font-weight: 600; min-height: 1.4em; }
+  #info { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  #moves {
+    max-height: 260px; overflow-y: auto; font-variant-numeric: tabular-nums;
+    display: grid; grid-template-columns: 2.4em 1fr 1fr; row-gap: 2px; font-size: 14px;
+  }
+  #moves .n { color: var(--muted); }
+  #promo {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none;
+    align-items: center; justify-content: center; z-index: 10;
+  }
+  #promo div { background: var(--panel); padding: 10px; border-radius: 8px; display: flex; gap: 6px; }
+  #promo button { font-size: 40px; width: 64px; height: 64px; padding: 0; background: var(--light); }
+</style>
+</head>
+<body>
+<main>
+  <div id="board"></div>
+  <aside>
+    <h1 id="title">Play the engine</h1>
+    <div class="row">
+      <label for="color">You play</label>
+      <select id="color"><option value="w">White</option><option value="b">Black</option></select>
+      <label for="time">Engine time</label>
+      <select id="time">
+        <option value="0.1">0.1 s</option><option value="0.5">0.5 s</option>
+        <option value="1" selected>1 s</option><option value="3">3 s</option><option value="10">10 s</option>
+      </select>
+    </div>
+    <div class="row">
+      <button class="primary" id="new">New game</button>
+      <button id="undo">Take back</button>
+      <button id="flip">Flip</button>
+    </div>
+    <div id="status"></div>
+    <div id="info"></div>
+    <div id="moves"></div>
+  </aside>
+</main>
+<div id="promo"><div></div></div>
+
+<script>
+const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+const FILES = "abcdefgh";
+let state = null, selected = null, flipped = false, thinking = false;
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+function pieces(fen) {
+  const map = {};
+  fen.split(" ")[0].split("/").forEach((row, i) => {
+    let f = 0;
+    for (const ch of row) {
+      if (/\d/.test(ch)) { f += +ch; continue; }
+      map[FILES[f] + (8 - i)] = ch;
+      f++;
+    }
+  });
+  return map;
+}
+
+function render() {
+  const board = $("board");
+  board.innerHTML = "";
+  const map = pieces(state.fen);
+  const targets = selected ? state.legal.filter(m => m.startsWith(selected)).map(m => m.slice(2, 4)) : [];
+  const last = state.last ? [state.last.slice(0, 2), state.last.slice(2, 4)] : [];
+  const kingInCheck = state.check
+    ? Object.keys(map).find(sq => map[sq] === (state.turn === "w" ? "K" : "k")) : null;
+
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const f = flipped ? 7 - col : col, r = flipped ? row : 7 - row;
+      const sq = FILES[f] + (r + 1);
+      const el = document.createElement("div");
+      el.className = "sq " + ((f + r) % 2 ? "l" : "d");
+      if (last.includes(sq)) el.classList.add("last");
+      if (sq === selected) el.classList.add("sel");
+      if (sq === kingInCheck) el.classList.add("check");
+      if (targets.includes(sq)) el.classList.add("target");
+      const p = map[sq];
+      if (p) {
+        if (targets.includes(sq)) el.classList.add("occ");
+        const span = document.createElement("span");
+        span.className = "pc " + (p === p.toUpperCase() ? "w" : "b");
+        span.textContent = GLYPH[p.toLowerCase()];
+        el.appendChild(span);
+      }
+      if (row === 7) el.insertAdjacentHTML("beforeend", `<span class="coord f">${FILES[f]}</span>`);
+      if (col === 0) el.insertAdjacentHTML("beforeend", `<span class="coord r">${r + 1}</span>`);
+      el.onclick = () => click(sq, map);
+      board.appendChild(el);
+    }
+  }
+
+  $("title").textContent = `You vs ${state.engine}`;
+  $("status").textContent = state.status
+    || (thinking ? `${state.engine} is thinking…` : state.turn === state.human ? "Your move" : "");
+  $("info").textContent = state.score
+    ? `Engine eval ${state.score} (White's view)` + (state.depth ? `, depth ${state.depth}` : "") : "";
+
+  const moves = $("moves");
+  moves.innerHTML = "";
+  for (let i = 0; i < state.san.length; i += 2) {
+    moves.insertAdjacentHTML("beforeend",
+      `<span class="n">${i / 2 + 1}.</span><span>${state.san[i]}</span><span>${state.san[i + 1] || ""}</span>`);
+  }
+  moves.scrollTop = moves.scrollHeight;
+}
+
+function myPiece(p) {
+  return p && (state.human === "w") === (p === p.toUpperCase());
+}
+
+function click(sq, map) {
+  if (thinking || state.status || state.turn !== state.human) return;
+  if (selected) {
+    const cands = state.legal.filter(m => m.startsWith(selected + sq));
+    if (cands.length === 1) return play(cands[0]);
+    if (cands.length > 1) return promote(selected + sq);
+  }
+  selected = myPiece(map[sq]) && sq !== selected ? sq : null;
+  render();
+}
+
+function promote(base) {
+  const box = $("promo"), inner = box.firstElementChild;
+  inner.innerHTML = "";
+  for (const p of "qrbn") {
+    const b = document.createElement("button");
+    b.textContent = GLYPH[p];
+    b.onclick = () => { box.style.display = "none"; play(base + p); };
+    inner.appendChild(b);
+  }
+  box.onclick = (e) => { if (e.target === box) box.style.display = "none"; };
+  box.style.display = "flex";
+}
+
+async function play(uci) {
+  selected = null;
+  const res = await api("/api/move", { move: uci });
+  state = res;
+  render();
+  if (!res.error) await engineTurn();
+}
+
+async function engineTurn() {
+  if (state.status || state.turn === state.human) return;
+  thinking = true; render();
+  state = await api("/api/go", {});
+  thinking = false; render();
+}
+
+$("new").onclick = async () => {
+  selected = null;
+  state = await api("/api/new", { color: $("color").value, movetime: +$("time").value });
+  flipped = state.human === "b";
+  render();
+  await engineTurn();
+};
+$("undo").onclick = async () => {
+  if (thinking) return;
+  selected = null;
+  state = await api("/api/undo", {});
+  render();
+};
+$("flip").onclick = () => { flipped = !flipped; render(); };
+
+(async () => {
+  state = await api("/api/state");
+  $("color").value = state.human;
+  const t = String(state.movetime);
+  if (![...$("time").options].some(o => o.value === t)) $("time").add(new Option(`${t} s`, t));
+  $("time").value = t;
+  flipped = state.human === "b";
+  render();
+  await engineTurn();
+})();
+</script>
+</body>
+</html>
