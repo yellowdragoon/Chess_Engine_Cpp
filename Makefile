@@ -9,7 +9,7 @@ HDRS = board.h magic.h hce_params.h
 $(EXE): $(SRCS) $(HDRS)
 	$(CXX) $(CXXFLAGS) $(WARNINGS) $(SRCS) -o $@
 
-.PHONY: test clean play
+.PHONY: test clean play test-play
 
 # Perft regression: node counts for standard test positions
 test: $(EXE)
@@ -18,6 +18,11 @@ test: $(EXE)
 # Play against the engine in the browser
 play: $(EXE)
 	cd tools && uv run play.py ../$(EXE) ../bin
+
+# Tests for the play GUI: engine UCI moves, server, and browser UI (Playwright).
+# The first run downloads headless Chromium (~100 MB) into Playwright's cache.
+test-play: $(EXE)
+	cd tools && uv run --group test playwright install chromium-headless-shell && ENGINE=../$(EXE) uv run --group test pytest tests -q
 
 clean:
 	rm -f $(EXE)

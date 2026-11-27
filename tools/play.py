@@ -81,14 +81,21 @@ class Game:
         self.engine = None
         self.engine_name = None
 
-    def new(self, name: str, human: chess.Color, movetime: float):
+    def new(self, name: str, human: chess.Color, movetime: float, fen: str | None = None):
         self.error = None
+        try:
+            board = chess.Board(fen) if fen else chess.Board()
+            if not board.is_valid():
+                raise ValueError(board.status().name)
+        except ValueError as e:
+            self.error = f"bad FEN: {e}"
+            board = chess.Board()
         try:
             self.load(name)
         except Exception as e:  # bad binary, crashed on startup, ...
             self.close()
             self.error = f"could not start {name}: {e}"
-        self.board = chess.Board()
+        self.board = board
         self.human = human
         self.movetime = movetime
         self.info = {}
@@ -134,17 +141,25 @@ class Game:
         return None
 
     def undo(self):
-        """Take back to the human's previous turn."""
-        if self.board.move_stack:
-            self.board.pop()
-        while self.board.move_stack and self.board.turn != self.human:
-            self.board.pop()
+        """Take back the human's last move and the engine's reply to it.
+
+        Does nothing if the human has not moved yet (e.g. playing Black and
+        only the engine's first move is on the board)."""
+        b = self.board
+        root_turn = b.root().turn
+        human_plies = [i for i in range(len(b.move_stack))
+                       if (root_turn if i % 2 == 0 else not root_turn) == self.human]
+        if not human_plies:
+            return
+        for _ in range(len(b.move_stack) - human_plies[-1]):
+            b.pop()
         self.info = {}
 
     def state(self) -> dict:
         b = self.board
         # SAN history, replayed from the start
-        replay, san = chess.Board(), []
+        replay, san = b.root(), []
+        root = b.root()
         for m in b.move_stack:
             san.append(replay.san(m))
             replay.push(m)
@@ -177,6 +192,8 @@ class Game:
             "last": b.move_stack[-1].uci() if b.move_stack else None,
             "check": b.is_check(),
             "san": san,
+            "first_move": root.fullmove_number,
+            "first_black": root.turn == chess.BLACK,
             "score": score,
             "cp": cp,
             "mate": mate,
@@ -225,7 +242,7 @@ def make_handler(game: Game):
                     human = chess.BLACK if req.get("color") == "b" else chess.WHITE
                     movetime = min(max(float(req.get("movetime", 1.0)), 0.05), 60.0)
                     name = req.get("engine") or game.engine_name or next(iter(game.engines))
-                    game.new(name, human, movetime)
+                    game.new(name, human, movetime, req.get("fen") or None)
                 elif self.path == "/api/move":
                     err = game.human_move(str(req.get("move", "")))
                     if err:

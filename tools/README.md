@@ -22,9 +22,29 @@ uv run play.py ../bin --port 8001                  # every engine in a folder
 
 Drag a piece or click it, then click a square. You can choose your colour and
 the engine's time per move, take back, and flip the board. The eval bar and the
-engine's line show its last score (White's view) and depth. Piece art is
+engine's line show its last score (White's view) and depth. To start from a
+position, paste a FEN into the new-game panel. Piece art is
 Colin M.L. Burnett's set (GPLv2+), loaded from lichess's repository at a pinned
 commit; offline, the page falls back to Unicode pieces.
+
+### Tests
+
+```sh
+make test-play     # from the repo root
+```
+
+Three layers, all against the real engine binary:
+
+- `tests/test_engine_uci.py`: the engine applies castling, en passant and
+  every promotion exactly as python-chess does (compares its `d` output after
+  special moves and along seeded random games).
+- `tests/test_play_server.py`: `play.py`'s rules, takeback, game endings,
+  FEN starts, long games, switching engines, broken or crashing engines, and
+  the HTTP API.
+- `tests/test_play_ui.py`: headless Chromium with real mouse clicks and drags:
+  moving, castling, en passant, promotion picker, playing Black, flip,
+  takeback, results, engine choice, phone layout and the offline fallback.
+  Piece images are stubbed, so the tests need no network.
 
 ## Match runner
 

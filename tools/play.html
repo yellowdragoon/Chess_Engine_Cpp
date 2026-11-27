@@ -124,7 +124,7 @@
   .field { display: grid; gap: 6px; margin-bottom: 12px; }
   .field:last-of-type { margin-bottom: 14px; }
   .field > span { font-size: 12.5px; color: var(--muted); }
-  select {
+  select, input[type=text] {
     font: inherit; width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line);
     background: var(--panel-2); color: var(--text);
   }
@@ -194,6 +194,9 @@
           <button data-v="3">3s</button><button data-v="10">10s</button>
         </div>
       </div>
+      <label class="field"><span>Start position (FEN, optional)</span>
+        <input id="fen" type="text" placeholder="Standard starting position" spellcheck="false" autocomplete="off">
+      </label>
       <button class="btn primary" id="new">Start game</button>
     </div>
 
@@ -245,11 +248,17 @@ function pieceEl(code) {   // code like "N" or "n"
   return img;
 }
 
+let pending = 0;   // requests in flight (the tests wait for this to reach 0)
 async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  return res.json();
+  pending++;
+  try {
+    const res = await fetch(path, body === undefined ? {} : {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return await res.json();
+  } finally {
+    pending--;
+  }
 }
 
 function pieces(fen) {
@@ -369,10 +378,16 @@ function renderPanel() {
   const moves = $("moves");
   moves.innerHTML = "";
   if (!state.san.length) moves.innerHTML = `<span class="empty">No moves yet.</span>`;
-  for (let i = 0; i < state.san.length; i += 2) {
-    const cur = (j) => j === state.san.length - 1 ? ' class="cur"' : "";
+  // pad with an empty white move when the game started with Black to move
+  const plies = state.first_black ? [null, ...state.san] : state.san;
+  for (let i = 0; i < plies.length; i += 2) {
+    const cell = (j) => {
+      if (j >= plies.length) return "<span></span>";
+      if (plies[j] === null) return "<span>…</span>";
+      return `<span${j === plies.length - 1 ? ' class="cur"' : ""}>${plies[j]}</span>`;
+    };
     moves.insertAdjacentHTML("beforeend",
-      `<span class="n">${i / 2 + 1}.</span><span${cur(i)}>${state.san[i]}</span><span${cur(i + 1)}>${state.san[i + 1] || ""}</span>`);
+      `<span class="n">${state.first_move + i / 2}.</span>${cell(i)}${cell(i + 1)}`);
   }
   moves.scrollTop = moves.scrollHeight;
   $("undo").disabled = thinking || !state.san.length;
@@ -458,7 +473,7 @@ $("new").onclick = async () => {
   if (thinking) return;
   selected = null;
   const color = prefs.color === "r" ? (Math.random() < 0.5 ? "w" : "b") : prefs.color;
-  state = await api("/api/new", { color, movetime: +prefs.time, engine: $("engine").value });
+  state = await api("/api/new", { color, movetime: +prefs.time, engine: $("engine").value, fen: $("fen").value.trim() });
   prefs.engine = state.engine ?? prefs.engine;
   flipped = state.human === "b";
   render();
@@ -469,6 +484,7 @@ $("undo").onclick = async () => {
   selected = null;
   state = await api("/api/undo", {});
   render();
+  await engineTurn();
 };
 $("flip").onclick = () => { flipped = !flipped; render(); };
 
