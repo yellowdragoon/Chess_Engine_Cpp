@@ -66,5 +66,56 @@
    "v4-texel": "8+0.08",
    "v3-search": "8+0.08"
   }
+ },
+ {
+  "new": "v5-nnue",
+  "old": "v4-texel",
+  "commit_new": "7fa126c",
+  "commit_old": "5452c4b",
+  "w": 96,
+  "d": 33,
+  "l": 71,
+  "elo": 43.7,
+  "err": 44.5,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v5-nnue": "8+0.08",
+   "v4-texel": "8+0.08"
+  }
+ },
+ {
+  "new": "v6-nnue-v4",
+  "old": "v5-nnue",
+  "commit_new": "a9f4098",
+  "commit_old": "7fa126c",
+  "w": 129,
+  "d": 36,
+  "l": 35,
+  "elo": 177.2,
+  "err": 48.4,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v6-nnue-v4": "8+0.08",
+   "v5-nnue": "8+0.08"
+  }
+ },
+ {
+  "new": "v7-fast-search",
+  "old": "v6-nnue-v4",
+  "commit_new": "32c527d",
+  "commit_old": "a9f4098",
+  "w": 98,
+  "d": 49,
+  "l": 53,
+  "elo": 79.5,
+  "err": 42.8,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v7-fast-search": "8+0.08",
+   "v6-nnue-v4": "8+0.08"
+  }
  }
 ]

@@ -16,3 +16,6 @@ Build any version with `make versions` and play it with `make play`.
 | `v2-zobrist` | Zobrist hashing, repetition and fifty-move draw detection | **+47** ± 41 | +86 =55 −59 | +47 |
 | `v3-search` | Iterative deepening, time control, transposition table, PVS, null move, LMR, killer and history ordering | **+636** ± 161 | +192 =6 −2 | +684 |
 | `v4-texel` | Texel-tuned tapered eval (separate middlegame and endgame tables) | **+210** ± 53 | +142 =24 −34 | +894 |
+| `v5-nnue` | NNUE evaluation (768 -> 256x2 -> 1, incremental accumulators), first trained net | **+44** ± 44 | +96 =33 −71 | +937 |
+| `v6-nnue-v4` | Net v4: more data plus games from the first net (bootstrapping) | **+177** ± 48 | +129 =36 −35 | +1114 |
+| `v7-fast-search` | Incremental Zobrist keys, cheaper quiescence, bounded history | **+80** ± 43 | +98 =49 −53 | +1194 |
