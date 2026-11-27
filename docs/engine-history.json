@@ -1,0 +1,70 @@
+[
+ {
+  "new": "v1-uci",
+  "old": "v0-original",
+  "commit_new": "dbd9e12",
+  "commit_old": "b232d9f",
+  "w": 68,
+  "d": 64,
+  "l": 68,
+  "elo": -0.0,
+  "err": 39.9,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v1-uci": "depth 4",
+   "v0-original": "depth 4"
+  }
+ },
+ {
+  "new": "v2-zobrist",
+  "old": "v1-uci",
+  "commit_new": "283e152",
+  "commit_old": "dbd9e12",
+  "w": 86,
+  "d": 55,
+  "l": 59,
+  "elo": 47.2,
+  "err": 41.4,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v2-zobrist": "depth 4",
+   "v1-uci": "depth 4"
+  }
+ },
+ {
+  "new": "v3-search",
+  "old": "v2-zobrist",
+  "commit_new": "83fdf50",
+  "commit_old": "283e152",
+  "w": 192,
+  "d": 6,
+  "l": 2,
+  "elo": 636.4,
+  "err": 160.9,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v3-search": "8+0.08",
+   "v2-zobrist": "depth 4"
+  }
+ },
+ {
+  "new": "v4-texel",
+  "old": "v3-search",
+  "commit_new": "5452c4b",
+  "commit_old": "83fdf50",
+  "w": 142,
+  "d": 24,
+  "l": 34,
+  "elo": 209.9,
+  "err": 52.9,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v4-texel": "8+0.08",
+   "v3-search": "8+0.08"
+  }
+ }
+]

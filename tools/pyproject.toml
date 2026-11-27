@@ -11,3 +11,17 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+test = [
+    "playwright>=1.65.2",
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # deprecations inside python-chess and Playwright on new Pythons, not ours
+    "ignore::DeprecationWarning:chess.*",
+    "ignore::DeprecationWarning:playwright.*",
+    "ignore::DeprecationWarning:pyee.*",
+]

@@ -1617,143 +1617,55 @@ void perft_test(int depth) {
   printf("Time (ms): %llu\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 }
 
-int material_score[12] = {
-    100,      // white pawn score
-    300,      // white knight scrore
-    350,      // white bishop score
-    500,      // white rook score
-   1000,      // white queen score
-  10000,      // white king score
-   -100,      // black pawn score
-   -300,      // black knight scrore
-   -350,      // black bishop score
-   -500,      // black rook score
-  -1000,      // black queen score
- -10000,      // black king score
-};
+/**********************************\
+ ==================================
+ 
+        Evaluation
+ 
+ ==================================
+\**********************************/
 
-const int pawn_score[64] = 
+// Piece-square weights with material folded in, one middlegame and one
+// endgame table per piece (see hce_params.h). tools/texel.py tunes them.
+#include "hce_params.h"
+
+// Game phase: 24 with all minor and major pieces on the board, 0 with none.
+// Knights and bishops count 1, rooks 2, queens 4.
+static int game_phase()
 {
-  0,   0,   0,   5,  10,  20,  30,  90, 
-  0,   0,   0,   5,  10,  20,  30,  90, 
-  0,   0,   0,  10,  10,  20,  30,  90, 
-  0,  -10,   5,  20,  20,  30,  40,  90,
-  0,  -10,   5,  20,  20,  30,  40,  90,
-  0,   0,   0,   5,  10,  20,  30,  90, 
-  0,   0,   0,   5,  10,  20,  30,  90, 
-  0,   0,   0,   5,  10,  20,  30,  90  
-};
+    int phase = count_bits(piece_bitboards[N] | piece_bitboards[n] | piece_bitboards[B] | piece_bitboards[b])
+              + 2 * count_bits(piece_bitboards[R] | piece_bitboards[r])
+              + 4 * count_bits(piece_bitboards[Q] | piece_bitboards[q]);
+    return phase > 24 ? 24 : phase;
+}
 
-// knight positional score
-const int knight_score[64] = 
-{
-  -5,  -5,  -5,  -5,  -5,  -5,  -5,  -5, 
-  -10,   0,   5,  10,  10,   5,   0,   0,
-    0,   0,  20,  20,  20,  20,   0,   0, 
-    0,   0,  20,  30,  30,  10,   0,   0, 
-    0,   0,  20,  30,  30,  10,   0,   0, 
-    0,   0,  20,  20,  20,  20,   0,   0, 
-  -10,   0,   5,  10,  10,   5,   0,   0,
-  -5,  -5,  -5,  -5,  -5,  -5,  -5,  -5  
-};
-
-// bishop positional score
-const int bishop_score[64] = 
-{
-     0,   0,   0,   0,   0,   0,   0,   0, 
-     0,   30,  10,  0,  0,   0,   0,   0,  
-    -10,  0,   0,  10,  10,   0,   0,   0, 
-     0,   0,   0,  20,  20,   10,   0,   0,
-     0,   0,   0,  20,  20,   10,   0,   0,
-     -10, 0,   0,  10,  10,   0,   0,   0, 
-     0,   30,  10,  0,   0,   0,   0,   0, 
-     0,   0,   0,   0,   0,   0,   0,   0  
-};
-
-// rook positional score
-const int rook_score[64] =
-{
-  0,  0,  0,  0,  0,  0, 50, 50,
-  0,  0,  0,  0,  0,  0, 50, 50,
-  0, 10, 10, 10, 10, 10, 50, 50,
-  20, 20, 20, 20, 20, 20, 50, 50,
-  20, 20, 20, 20, 20, 20, 50, 50,
-  0, 10, 10, 10, 10, 10, 50, 50,
-  0,  0,  0,  0,  0,  0, 50, 50,
-  0,  0,  0,  0,  0,  0, 50, 50
-};
-
-// king positional score
-const int king_score[64] = 
-{
-   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   5,   0,   5,   5,   5,   0,   0,
-   5,   5,   5,  10,  10,   5,   5,   0,
-   0,  -5,  10,  20,  20,  10,   5,   0,
-  -15,  -5,  10,  20,  20,  10,   5,   0,
-   0,   0,   5,  10,  10,   5,   5,   0,
-   10,  5,   0,   5,   5,   5,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0
-};
-
-// mirror positional score tables for opposite side
-const int mirror_score[128] =
-{
-  a8, a7, a6, a5, a4, a3, a2, a1,
-  b8, b7, b6, b5, b4, b3, b2, b1,
-  c8, c7, c6, c5, c4, c3, c2, c1,
-  d8, d7, d6, d5, d4, d3, d2, d1,
-  e8, e7, e6, e5, e4, e3, e2, e1,
-  f8, f7, f6, f5, f4, f3, f2, f1,
-  g8, g7, g6, g5, g4, g3, g2, g1,
-  h8, h7, h6, h5, h4, h3, h2, h1
-};
-
+// Hand-crafted static evaluation from the side to move's point of view. A white
+// piece on square sq scores weight[piece][sq]; a black piece scores minus the
+// weight of the mirrored square (sq ^ 7 flips the rank in file-major order).
 int evaluate_hce()
 {
-    int score = 0;
-    // current pieces bitboard copy
-    U64 bitboard;
-    int piece, square;
-    
-    // loop over piece bitboards
-    for (int bb_piece = P; bb_piece <= k; bb_piece++)
+    int mg = 0, eg = 0;
+    for (int piece = P; piece <= K; piece++)
     {
-        // init piece bitboard copy
-        bitboard = piece_bitboards[bb_piece];
-        
-        // loop over pieces within a bitboard
+        U64 bitboard = piece_bitboards[piece];
         while (bitboard)
         {
-            piece = bb_piece;
-            square = ls1b_index(bitboard);
-            score += material_score[piece];
-
-            // score positional piece scores
-            switch (piece)
-            {
-                // evaluate white pieces
-                case P: score += pawn_score[square]; break;
-                case N: score += knight_score[square]; break;
-                case B: score += bishop_score[square]; break;
-                case R: score += rook_score[square]; break;
-                case K: score += king_score[square]; break;
-
-                // evaluate black pieces
-                case p: score -= pawn_score[mirror_score[square]]; break;
-                case n: score -= knight_score[mirror_score[square]]; break;
-                case b: score -= bishop_score[mirror_score[square]]; break;
-                case r: score -= rook_score[mirror_score[square]]; break;
-                case k: score -= king_score[mirror_score[square]]; break;
-            }
-
-            // printf("%d %c %s\n", score, pieces_ascii[piece], index_to_square_name[square]);
-            
+            int square = ls1b_index(bitboard);
+            mg += hce_mg[piece][square];
+            eg += hce_eg[piece][square];
+            remove_bit(bitboard, square);
+        }
+        bitboard = piece_bitboards[piece + 6];
+        while (bitboard)
+        {
+            int square = ls1b_index(bitboard);
+            mg -= hce_mg[piece][square ^ 7];
+            eg -= hce_eg[piece][square ^ 7];
             remove_bit(bitboard, square);
         }
     }
-    
-    // return final evaluation based on side
+    int phase = game_phase();
+    int score = (mg * phase + eg * (24 - phase)) / 24;
     return (side_to_move == white) ? score : -score;
 }
 
@@ -2499,6 +2411,9 @@ void uci_loop(){
     }
 
     // non-UCI debug command: "perft <depth>" on the current position
+    else if(strncmp(input, "eval", 4) == 0){
+      printf("%d\n", evaluate());
+    }
     else if(strncmp(input, "perft", 5) == 0){
       perft_test(atoi(input + 6));
     }
