@@ -4,7 +4,7 @@ WARNINGS  = -Wall -Wno-writable-strings -Wno-missing-braces -Wno-bitwise-op-pare
 EXE      ?= engine
 
 SRCS = board.cpp
-HDRS = board.h magic.h
+HDRS = board.h magic.h hce_params.h
 
 $(EXE): $(SRCS) $(HDRS)
 	$(CXX) $(CXXFLAGS) $(WARNINGS) $(SRCS) -o $@
