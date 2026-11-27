@@ -1,14 +1,18 @@
 """Play against the engine in a browser.
 
-    uv run play.py ../engine            # then open http://localhost:8000
+    uv run play.py                      # current build plus every engine in ../bin
+    uv run play.py ../bin/nnue-v4 ../bin/hce-texel-B   # just these
+    uv run play.py ../bin --port 8001   # every engine in a folder
 
 A small HTTP server (standard library only, plus python-chess) that keeps one
 game, checks your moves, asks the engine for its reply over UCI and serves
-play.html. Only one game at a time; it is meant for local use.
+play.html. Pick the opponent from the page; only one game at a time, and it
+is meant for local use.
 """
 
 import argparse
 import json
+import os
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,18 +30,64 @@ PAGE = Path(__file__).with_name("play.html")
 MAX_SENT_PLIES = 100
 
 
+def find_engines(paths: list[str]) -> dict[str, Path]:
+    """Map a display name to each engine binary. Folders are expanded."""
+    engines: dict[str, Path] = {}
+    for p in map(Path, paths):
+        if p.is_dir():
+            files = sorted(f for f in p.iterdir() if f.is_file() and os.access(f, os.X_OK))
+        elif p.is_file():
+            files = [p]
+        else:
+            continue
+        for f in files:
+            name = f.name
+            if name in engines and engines[name].resolve() != f.resolve():
+                name = f"{f.parent.name}/{f.name}"
+            engines.setdefault(name, f)
+    return engines
+
+
 class Game:
-    def __init__(self, engine_path: str, hash_mb: int):
-        self.engine = chess.engine.SimpleEngine.popen_uci(engine_path)
+    def __init__(self, engines: dict[str, Path], hash_mb: int):
+        self.engines = engines
+        self.hash_mb = hash_mb
+        self.engine = None
+        self.engine_name = None
+        self.error = None
+        self.lock = threading.Lock()
+        self.new(next(iter(engines)), chess.WHITE, 1.0)
+
+    def load(self, name: str):
+        """Start the named engine, stopping the previous one."""
+        if name == self.engine_name and self.engine is not None:
+            return
+        if name not in self.engines:
+            raise ValueError(f"unknown engine {name!r}")
+        self.close()
+        self.engine = chess.engine.SimpleEngine.popen_uci(str(self.engines[name]))
         try:
-            self.engine.configure({"Hash": hash_mb})
+            self.engine.configure({"Hash": self.hash_mb})
         except chess.engine.EngineError:
             pass  # engine has no Hash option
-        self.name = self.engine.id.get("name", Path(engine_path).name)
-        self.lock = threading.Lock()
-        self.new(chess.WHITE, 1.0)
+        self.engine_name = name
 
-    def new(self, human: chess.Color, movetime: float):
+    def close(self):
+        if self.engine is not None:
+            try:
+                self.engine.quit()
+            except chess.engine.EngineTerminatedError:
+                pass
+        self.engine = None
+        self.engine_name = None
+
+    def new(self, name: str, human: chess.Color, movetime: float):
+        self.error = None
+        try:
+            self.load(name)
+        except Exception as e:  # bad binary, crashed on startup, ...
+            self.close()
+            self.error = f"could not start {name}: {e}"
         self.board = chess.Board()
         self.human = human
         self.movetime = movetime
@@ -55,13 +105,19 @@ class Game:
         return b
 
     def engine_move(self):
-        if self.board.is_game_over(claim_draw=True) or self.board.turn == self.human:
+        if (self.engine is None or self.board.is_game_over(claim_draw=True)
+                or self.board.turn == self.human):
             return
-        result = self.engine.play(
-            self.board_for_engine(),
-            chess.engine.Limit(time=self.movetime),
-            info=chess.engine.INFO_SCORE,
-        )
+        try:
+            result = self.engine.play(
+                self.board_for_engine(),
+                chess.engine.Limit(time=self.movetime),
+                info=chess.engine.INFO_SCORE,
+            )
+        except (chess.engine.EngineError, chess.engine.EngineTerminatedError) as e:
+            self.error = f"{self.engine_name} failed: {e}"
+            self.close()
+            return
         self.info = result.info
         self.board.push(result.move)
 
@@ -93,20 +149,25 @@ class Game:
             san.append(replay.san(m))
             replay.push(m)
 
-        score = None
+        score = cp = mate = None
         if "score" in self.info:
             s = self.info["score"].white()
-            score = f"#{s.mate()}" if s.is_mate() else f"{s.score() / 100:+.2f}"
+            if s.is_mate():
+                mate = s.mate()
+                score = f"#{mate}"
+            else:
+                cp = s.score()
+                score = f"{cp / 100:+.2f}"
 
         status = None
         outcome = b.outcome(claim_draw=True)
         if outcome:
             reason = outcome.termination.name.replace("_", " ").lower()
             if outcome.winner is None:
-                status = f"Draw ({reason})"
+                status = f"Draw by {reason}"
             else:
-                who = "You win" if outcome.winner == self.human else f"{self.name} wins"
-                status = f"{who} ({reason})"
+                who = "You win" if outcome.winner == self.human else f"{self.engine_name} wins"
+                status = f"{who} by {reason}"
 
         return {
             "fen": b.fen(),
@@ -117,9 +178,13 @@ class Game:
             "check": b.is_check(),
             "san": san,
             "score": score,
+            "cp": cp,
+            "mate": mate,
             "depth": self.info.get("depth"),
             "status": status,
-            "engine": self.name,
+            "error": self.error,
+            "engine": self.engine_name,
+            "engines": list(self.engines),
             "movetime": self.movetime,
         }
 
@@ -159,11 +224,12 @@ def make_handler(game: Game):
                 if self.path == "/api/new":
                     human = chess.BLACK if req.get("color") == "b" else chess.WHITE
                     movetime = min(max(float(req.get("movetime", 1.0)), 0.05), 60.0)
-                    game.new(human, movetime)
+                    name = req.get("engine") or game.engine_name or next(iter(game.engines))
+                    game.new(name, human, movetime)
                 elif self.path == "/api/move":
                     err = game.human_move(str(req.get("move", "")))
                     if err:
-                        return self.send_json({"error": err, **game.state()}, 400)
+                        return self.send_json({**game.state(), "error": err}, 400)
                 elif self.path == "/api/undo":
                     game.undo()
                 elif self.path == "/api/go":
@@ -176,17 +242,23 @@ def make_handler(game: Game):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Play against a UCI engine in the browser.")
-    p.add_argument("engine", nargs="?", default="../engine", help="path to the engine binary")
+    p = argparse.ArgumentParser(description="Play against UCI engines in the browser.")
+    p.add_argument("engines", nargs="*", default=["../engine", "../bin"],
+                   help="engine binaries or folders of them (default: ../engine and ../bin)")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--hash", type=int, default=64, help="hash table size in MB")
     p.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     args = p.parse_args()
 
-    game = Game(args.engine, args.hash)
+    engines = find_engines(args.engines)
+    if not engines:
+        p.error(f"no engine binaries found in {' '.join(args.engines)}; run `make` first")
+
+    game = Game(engines, args.hash)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(game))
     url = f"http://localhost:{args.port}"
-    print(f"Playing {game.name} at {url}  (Ctrl-C to stop)")
+    print(f"{len(engines)} engine(s): {', '.join(engines)}")
+    print(f"Open {url}  (Ctrl-C to stop)")
     if not args.no_browser:
         webbrowser.open(url)
     try:
@@ -194,7 +266,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        game.engine.quit()
+        game.close()
 
 
 if __name__ == "__main__":

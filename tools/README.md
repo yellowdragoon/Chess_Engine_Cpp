@@ -6,13 +6,25 @@ Run everything from this directory; `uv run` creates the environment on first us
 ## Play against the engine
 
 ```sh
-make play                      # from the repo root: builds the engine and opens a board in the browser
-cd tools && uv run play.py ../bin/some-version --port 8001   # any UCI engine
+make play            # from the repo root: builds ./engine, then opens a board in the browser
 ```
 
-Click a piece, then a highlighted square. You can pick your colour and the
-engine's time per move, take back, and flip the board. The panel shows the
-engine's eval (from White's point of view) and the depth it reached.
+The page lets you pick the opponent from the current build (`engine`) and
+every binary in `bin/`, so saved versions like `bin/nnue-v4` or
+`bin/hce-texel-B` are one click away. To save the current build as a version
+you can play later, run `make EXE=bin/<name>`. To choose the list yourself:
+
+```sh
+cd tools
+uv run play.py ../bin/nnue-v4 ../bin/hce-texel-B   # just these
+uv run play.py ../bin --port 8001                  # every engine in a folder
+```
+
+Drag a piece or click it, then click a square. You can choose your colour and
+the engine's time per move, take back, and flip the board. The eval bar and the
+engine's line show its last score (White's view) and depth. Piece art is
+Colin M.L. Burnett's set (GPLv2+), loaded from lichess's repository at a pinned
+commit; offline, the page falls back to Unicode pieces.
 
 ## Match runner
 

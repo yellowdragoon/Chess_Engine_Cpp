@@ -17,7 +17,7 @@ test: $(EXE)
 
 # Play against the engine in the browser
 play: $(EXE)
-	cd tools && uv run play.py ../$(EXE)
+	cd tools && uv run play.py ../$(EXE) ../bin
 
 clean:
 	rm -f $(EXE)
