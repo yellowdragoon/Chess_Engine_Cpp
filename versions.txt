@@ -20,3 +20,4 @@ v4-texel       5452c4b   -        Texel-tuned tapered eval (separate middlegame 
 v5-nnue        7fa126c   -        NNUE evaluation (768 -> 256x2 -> 1, incremental accumulators), first trained net
 v6-nnue-v4     a9f4098   -        Net v4: more data plus games from the first net (bootstrapping)
 v7-fast-search 32c527d   -        Incremental Zobrist keys, cheaper quiescence, bounded history
+v8-nnue-v6     cd041c3   -        Net v6: 34.5M positions, adding games from net v4 (optional SCReLU build)
