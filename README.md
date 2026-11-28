@@ -62,16 +62,24 @@ Every milestone is listed in [`versions.txt`](versions.txt) and tagged
 each version against the one before it. Its latest results (200 games per
 pair at 8+0.08, from [`docs/engine-history.md`](docs/engine-history.md)):
 
-| Version | What it added | Elo vs previous |
-|---|---|---|
-| `v0-original` | Bitboards, negamax alpha-beta, quiescence, MVV-LVA ordering, material + piece-square tables | baseline |
-| `v1-uci` | Makefile, perft tests, UCI mode, capture-generation bug fix | +0 ± 40 |
-| `v2-zobrist` | Zobrist hashing, repetition and fifty-move draws | +47 ± 41 |
-| `v3-search` | Iterative deepening, time control, transposition table, PVS, null move, LMR, killers and history | +636 ± 161 |
-| `v4-texel` | Texel-tuned tapered evaluation | +210 ± 53 |
-| `v5-nnue` | NNUE evaluation (768 → 256×2 → 1), first trained net | +44 ± 44 |
-| `v6-nnue-v4` | Net v4: more data plus games from the first net | +177 ± 48 |
-| `v7-fast-search` | Incremental Zobrist keys, cheaper quiescence, bounded history | +80 ± 43 |
+| Version | What it added | Elo vs previous | Estimated rating |
+|---|---|---|---|
+| `v0-original` | Bitboards, negamax alpha-beta, quiescence, MVV-LVA ordering, material + piece-square tables | baseline | ~1540 ± 200 |
+| `v1-uci` | Makefile, perft tests, UCI mode, capture-generation bug fix | +0 ± 40 | ~1540 ± 190 |
+| `v2-zobrist` | Zobrist hashing, repetition and fifty-move draws | +47 ± 41 | ~1590 ± 190 |
+| `v3-search` | Iterative deepening, time control, transposition table, PVS, null move, LMR, killers and history | +636 ± 161 | ~2220 ± 100 |
+| `v4-texel` | Texel-tuned tapered evaluation | +210 ± 53 | ~2430 ± 90 |
+| `v5-nnue` | NNUE evaluation (768 → 256×2 → 1), first trained net | +44 ± 44 | ~2480 ± 70 |
+| `v6-nnue-v4` | Net v4: more data plus games from the first net | +177 ± 48 | ~2660 ± 50 |
+| `v7-fast-search` | Incremental Zobrist keys, cheaper quiescence, bounded history | +80 ± 43 | **2735 ± 33** (measured) |
+
+The estimated rating is on Stockfish's `UCI_Elo` scale. Only `v7` was
+measured directly: `tools/rate.py` played it against Stockfish 19 at reduced
+strength (300 games at levels 2600 and 2800, 8+0.08). Each older version's
+rating is that figure minus the ladder steps above it, so the error bars add up
+on the way down. Self-play gaps tend to overstate the difference against other
+opponents, so the oldest versions are probably somewhat stronger than shown.
+Treat all of these as rough guides, not CCRL ratings.
 
 `v0`–`v2` predate time control, so they search to a fixed depth of 4, and the
 `v3` step includes the switch to playing on the clock.
