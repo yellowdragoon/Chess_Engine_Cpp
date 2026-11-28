@@ -31,13 +31,41 @@ and killer bonuses): `bench 9` 2448 ms -> 1754 ms on the same node count
 (±0.03%), and **+64 ± 30** (+185 =103 −112, 400 games) against the
 previous build with the same network.
 
-`nets/net.bin` is v4. More data has been the biggest lever so far: going
-from 6.7M to 19M positions was worth about 110 Elo, and adding the v1
-self-play positions about 130 more.
+## Round 3: v4 self-play data, CReLU vs SCReLU
+
+8.4M more positions from v4's own games (34.5M in total, same 2% validation
+split for every net below). Matches are against v4 on the current search:
+
+| Net | Data | Activation | Val loss | vs v4 | Games |
+|-----|------|------------|----------|-------|-------|
+| v5s | 26.8M (as v4) | SCReLU | 0.007405 (v4: 0.007536) | **−74 ± 34** (+103 =67 −176), SPRT H0 | 346 |
+| v5s, both at depth 8 | | | | **−22 ± 30** (+143 =89 −168) | 400 |
+| v6s | 34.5M | SCReLU | 0.007588 | **+21 ± 14** (+760 =376 −653), SPRT H1 | 1789 |
+| **v6** | 34.5M | CReLU | 0.007709 | **+61 ± 28** (+266 =86 −175), SPRT H1 | 527 |
+| **v6**, clean rerun | | | | **+67 ± 31** (+193 =90 −117) | 400 |
+
+`nets/net.bin` is now v6 (CReLU). Three lessons:
+
+- **More data, from the latest net, is still the lever.** Adding v4's games
+  was worth about +65, on top of +110 (6.7M → 19M HCE positions) and +130
+  (v1's games) before it.
+- **SCReLU fits better but plays worse here.** Its validation loss is lower
+  every time, yet it loses at a fixed depth too, so this is not just speed.
+  It is also about 35% slower (2.09M vs 3.21M nps on `bench 9`): v * v * w
+  needs 32-bit products where CReLU's fit in 16 bits. Engines that gain from
+  SCReLU usually pair it with a smaller QB (64) and clipped output weights so
+  the product stays in 16 bits; worth trying with a bigger hidden layer.
+  `make ACTIVATION=screlu NET=...` still builds it.
+- **Validation loss is not Elo.** Every activation decision needs a match.
+
+The SPRT runs above (not the reruns) shared the machine with another match,
+and 10–18% of their games ended on time forfeits; the clean rerun had none
+and agrees with them.
 
 ## Setup
 
 - Network: `768 → 256` per side, `[stm, nstm] → CReLU → 1`, int16, QA 255 / QB 512
+  (`ACTIVATION=screlu` builds the SCReLU variant)
 - Data: `engine datagen`, 5k soft nodes per move, quiet positions only, 8–9
   random opening plies
 - Loss: `0.75 · sigmoid(score/400) + 0.25 · result`, MSE in sigmoid space,
@@ -54,5 +82,5 @@ cd tools && uv run match.py ../bin/nnue ../bin/hce --games 200 --tc 8+0.08 --con
 
 ## Next
 
-- Round 3: self-play data from v4 (running)
-- Larger hidden layer, SCReLU, output buckets
+- Round 4: self-play data from v6
+- Larger hidden layer (and retry SCReLU with QB 64 there), output buckets

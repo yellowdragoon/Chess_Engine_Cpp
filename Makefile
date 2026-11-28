@@ -7,12 +7,17 @@ EXE      ?= engine
 # hand-crafted evaluation only.
 EVAL     ?= nnue
 NET      ?= nets/net.bin
+# activation the network was trained with: crelu or screlu
+ACTIVATION ?= crelu
 
 SRCS = board.cpp
 HDRS = board.h magic.h hce_params.h
 
 ifeq ($(EVAL),nnue)
   DEFINES = -DUSE_NNUE=1
+  ifeq ($(ACTIVATION),screlu)
+    DEFINES += -DNNUE_SCRELU=1
+  endif
   NET_HDR = nnue_net.h
 else
   DEFINES = -DUSE_NNUE=0
@@ -23,12 +28,15 @@ $(EXE): $(SRCS) $(HDRS) $(NET_HDR)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(WARNINGS) $(DEFINES) $(SRCS) -o $@
 
-# The network as a C array, regenerated whenever NET changes
-nnue_net.h: $(NET)
-	{ echo '// generated from $(NET) by make; do not edit'; \
+# The network as a C array. Checked on every build: switching NET to an older
+# file (say NET=data/net-v4.bin) must still replace the header, so it is
+# rewritten whenever its contents would change, not by timestamp.
+nnue_net.h: $(NET) FORCE
+	@{ echo '// generated from $(NET) by make; do not edit'; \
 	  echo 'alignas(64) static const unsigned char nnue_net_data[] = {'; \
 	  xxd -i < $(NET); \
-	  echo '};'; } > $@
+	  echo '};'; } > $@.tmp
+	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; echo "embedded $(NET)"; fi
 
 .PHONY: test clean FORCE play test-play versions ladder
 
