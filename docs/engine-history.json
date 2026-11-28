@@ -117,5 +117,22 @@
    "v7-fast-search": "8+0.08",
    "v6-nnue-v4": "8+0.08"
   }
+ },
+ {
+  "new": "v8-nnue-v6",
+  "old": "v7-fast-search",
+  "commit_new": "cd041c3",
+  "commit_old": "32c527d",
+  "w": 97,
+  "d": 46,
+  "l": 57,
+  "elo": 70.4,
+  "err": 43.1,
+  "tc": "8+0.08",
+  "games": 200,
+  "limits": {
+   "v8-nnue-v6": "8+0.08",
+   "v7-fast-search": "8+0.08"
+  }
  }
 ]

@@ -19,3 +19,4 @@ Build any version with `make versions` and play it with `make play`.
 | `v5-nnue` | NNUE evaluation (768 -> 256x2 -> 1, incremental accumulators), first trained net | **+44** ± 44 | +96 =33 −71 | +937 |
 | `v6-nnue-v4` | Net v4: more data plus games from the first net (bootstrapping) | **+177** ± 48 | +129 =36 −35 | +1114 |
 | `v7-fast-search` | Incremental Zobrist keys, cheaper quiescence, bounded history | **+80** ± 43 | +98 =49 −53 | +1194 |
+| `v8-nnue-v6` | Net v6: 34.5M positions, adding games from net v4 (optional SCReLU build) | **+70** ± 43 | +97 =46 −57 | +1264 |

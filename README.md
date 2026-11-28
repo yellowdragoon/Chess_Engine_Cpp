@@ -10,6 +10,7 @@ measured against the version before it.
 ```sh
 make              # builds ./engine with the NNUE eval (clang++ or g++, C++17; needs xxd)
 make EVAL=hce     # the hand-written (Texel-tuned) evaluation instead
+make ACTIVATION=screlu NET=<net>  # an SCReLU network (see docs/nnue-results.md)
 make test         # perft: move generation against published node counts
 make play         # opens a board in your browser to play against it
 ```
@@ -72,12 +73,13 @@ pair at 8+0.08, from [`docs/engine-history.md`](docs/engine-history.md)):
 | `v5-nnue` | NNUE evaluation (768 → 256×2 → 1), first trained net | +44 ± 44 | ~2480 ± 70 |
 | `v6-nnue-v4` | Net v4: more data plus games from the first net | +177 ± 48 | ~2660 ± 50 |
 | `v7-fast-search` | Incremental Zobrist keys, cheaper quiescence, bounded history | +80 ± 43 | **2735 ± 33** (measured) |
+| `v8-nnue-v6` | Net v6: 34.5M positions, adding games from net v4 | +70 ± 43 | ~2805 ± 55 |
 
 The estimated rating is on Stockfish's `UCI_Elo` scale. Only `v7` was
 measured directly: `tools/rate.py` played it against Stockfish 19 at reduced
-strength (300 games at levels 2600 and 2800, 8+0.08). Each older version's
-rating is that figure minus the ladder steps above it, so the error bars add up
-on the way down. Self-play gaps tend to overstate the difference against other
+strength (300 games at levels 2600 and 2800, 8+0.08). Every other version's
+rating is that figure plus or minus the ladder steps in between, so the error
+bars grow with distance from `v7`. Self-play gaps tend to overstate the difference against other
 opponents, so the oldest versions are probably somewhat stronger than shown.
 Treat all of these as rough guides, not CCRL ratings.
 
