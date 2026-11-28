@@ -1224,7 +1224,13 @@ void init_all() {
 #endif
 
 #define NNUE_INPUTS 768
+#ifndef NNUE_HIDDEN
 #define NNUE_HIDDEN 256
+#endif
+// 1: squared clipped ReLU, 0: clipped ReLU (must match the trained network)
+#ifndef NNUE_SCRELU
+#define NNUE_SCRELU 0
+#endif
 #define NNUE_QA 255
 #define NNUE_QB 512
 #define NNUE_SCALE 400
@@ -1338,11 +1344,32 @@ static inline int nnue_evaluate() {
   const accumulator *acc = &acc_stack[acc_top];
   const int16_t *us = acc->values[side_to_move];
   const int16_t *them = acc->values[side_to_move ^ 1];
+#if NNUE_SCRELU
+  // v * v * w carries an extra factor of QA. The trainer keeps |w| <= 2047, so
+  // a block of 8 terms (at most 8 * 255^2 * 2047, about 1.07e9) fits in int32;
+  // summing in int32 blocks lets the compiler vectorize, widening once per block.
+  static_assert(NNUE_HIDDEN % 8 == 0, "SCReLU blocks of 8");
+  int64_t sum = 0;
+  for (int side = 0; side < 2; side++) {
+    const int16_t *values = side == 0 ? us : them;
+    const int16_t *weights = nnue_out_weights + side * NNUE_HIDDEN;
+    for (int i = 0; i < NNUE_HIDDEN; i += 8) {
+      int32_t block = 0;
+      for (int j = i; j < i + 8; j++) {
+        int v = clamp_activation(values[j]);
+        block += v * v * weights[j];
+      }
+      sum += block;
+    }
+  }
+  sum /= NNUE_QA;
+#else
   int32_t sum = 0;
   for (int i = 0; i < NNUE_HIDDEN; i++)
     sum += clamp_activation(us[i]) * nnue_out_weights[i];
   for (int i = 0; i < NNUE_HIDDEN; i++)
     sum += clamp_activation(them[i]) * nnue_out_weights[NNUE_HIDDEN + i];
+#endif
   return (int)(((int64_t)sum + nnue_out_bias) * NNUE_SCALE / (NNUE_QA * NNUE_QB));
 }
 

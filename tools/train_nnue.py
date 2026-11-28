@@ -29,11 +29,14 @@ PAD = 768
 SCALE = 400.0
 QA, QB = 255, 512
 FT_CLIP = 127 / QA * 2  # keeps 32 summed features inside int16 after quantization
+# SCReLU: the engine sums v * v * w in int32 blocks of 8, which needs |w| <= 2047
+SCRELU_OUT_MAX = 2047
 
 
 class NNUE(nn.Module):
-    def __init__(self, hidden: int):
+    def __init__(self, hidden: int, activation: str = "crelu"):
         super().__init__()
+        self.activation = activation
         self.ft = nn.EmbeddingBag(INPUTS + 1, hidden, mode="sum", padding_idx=PAD)
         self.ft_bias = nn.Parameter(torch.zeros(hidden))
         self.out = nn.Linear(2 * hidden, 1)
@@ -45,12 +48,16 @@ class NNUE(nn.Module):
         stm = self.ft(stm_feats) + self.ft_bias
         nstm = self.ft(nstm_feats) + self.ft_bias
         hidden = torch.clamp(torch.cat([stm, nstm], dim=1), 0.0, 1.0)
+        if self.activation == "screlu":
+            hidden = hidden * hidden
         return self.out(hidden).squeeze(1)  # eval in units of SCALE centipawns
 
     def clip(self):
         with torch.no_grad():
             self.ft.weight.clamp_(-FT_CLIP, FT_CLIP)
             self.ft.weight[PAD].zero_()
+            if self.activation == "screlu":
+                self.out.weight.clamp_(-SCRELU_OUT_MAX / QB, SCRELU_OUT_MAX / QB)
 
 
 def load(paths, val_fraction, seed):
@@ -98,6 +105,8 @@ def export(model, path):
     q_ft_b = np.round(ft_b * QA).astype(np.int16)
     q_out_w = np.clip(np.round(out_w * QB), -32768, 32767).astype(np.int16)
     q_out_b = np.int32(round(out_b * QA * QB))
+    if model.activation == "screlu" and np.abs(q_out_w.astype(np.int32)).max() > SCRELU_OUT_MAX:
+        raise ValueError(f"SCReLU output weights must stay within ±{SCRELU_OUT_MAX} for the engine's int32 sums")
     with open(path, "wb") as f:
         f.write(q_ft_w.tobytes())
         f.write(q_ft_b.tobytes())
@@ -107,7 +116,7 @@ def export(model, path):
           f"max |ft| {np.abs(q_ft_w).max()}, max |out| {np.abs(q_out_w).max()}")
 
 
-def quantized_eval(path, hidden, white_feats, black_feats, stm):
+def quantized_eval(path, hidden, white_feats, black_feats, stm, activation="crelu"):
     """Reference integer inference, identical to the engine's. Returns cp."""
     raw = open(path, "rb").read()
     o = 0
@@ -118,8 +127,13 @@ def quantized_eval(path, hidden, white_feats, black_feats, stm):
     acc_w = ft_b + ft_w[white_feats].sum(0)
     acc_b = ft_b + ft_w[black_feats].sum(0)
     us, them = (acc_w, acc_b) if stm == 0 else (acc_b, acc_w)
-    hidden_act = np.clip(np.concatenate([us, them]), 0, QA)
-    out = int((hidden_act * out_w).sum()) + out_b
+    hidden_act = np.clip(np.concatenate([us, them]), 0, QA).astype(np.int64)
+    if activation == "screlu":
+        # (v * v) * w is QA * QA * QB; divide by QA (truncating, like C++) to get back to QA * QB
+        total = int((hidden_act * hidden_act * out_w).sum())
+        out = (total // QA if total >= 0 else -((-total) // QA)) + out_b
+    else:
+        out = int((hidden_act * out_w).sum()) + out_b
     # integer division truncating toward zero, like C++
     q = out * int(SCALE)
     return q // (QA * QB) if q >= 0 else -((-q) // (QA * QB))
@@ -130,6 +144,8 @@ def main():
     ap.add_argument("data", nargs="+", help="one or more .npz files from nnue_data.py")
     ap.add_argument("--out", default="net.bin")
     ap.add_argument("--hidden", type=int, default=256)
+    ap.add_argument("--activation", choices=["crelu", "screlu"], default="crelu",
+                    help="clipped ReLU, or squared clipped ReLU (the engine needs NNUE_SCRELU=1)")
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--batch", type=int, default=16384)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -144,9 +160,9 @@ def main():
         torch.set_num_threads(args.threads)
     train, val = load(args.data, args.val, args.seed)
     n = len(train[0])
-    print(f"train {n}  val {len(val[0])}  hidden {args.hidden}")
+    print(f"train {n}  val {len(val[0])}  hidden {args.hidden}  activation {args.activation}")
 
-    model = NNUE(args.hidden)
+    model = NNUE(args.hidden, args.activation)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
